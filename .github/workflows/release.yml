@@ -164,8 +164,9 @@ jobs:
       - name: Attach to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: gh release upload "$TAG" dist/orzmc* --clobber
+        # 这个 job 会在 Windows 上跑,shell 是 pwsh —— 那里 `$TAG` 是 PowerShell 变量
+        # (空字符串),只有 `$env:TAG` 才是环境变量。用表达式内联最稳,与 shell 无关。
+        run: gh release upload "${{ inputs.tag || github.ref_name }}" dist/orzmc* --clobber
 
   pypi:
     needs: quality

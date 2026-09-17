@@ -109,6 +109,10 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     assert config["draft"] is True
     # 官网"最新版"是部署期注入的,发布完还要显式重部署 Pages。
     assert "gh workflow run pages.yml" in release
+    # binary job 会跑在 Windows 上,shell 是 pwsh:那里 `$TAG` 是 PowerShell 变量(空),
+    # 只有 `$env:TAG` 是环境变量 —— 跨平台步骤必须内联表达式。
+    assert 'gh release upload "$TAG"' not in release
+    assert 'gh release upload "${{ inputs.tag || github.ref_name }}"' in release
 
 
 @needs_checkout
