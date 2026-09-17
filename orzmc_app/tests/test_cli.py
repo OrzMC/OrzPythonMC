@@ -8,6 +8,7 @@ import sys
 from typer.testing import CliRunner
 
 from orzmc import FileStore, UpdateCheck
+from orzmc import __version__ as lib_version
 from orzmc_app import __version__
 from orzmc_app.cli import app
 
@@ -22,6 +23,11 @@ def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert __version__ in result.stdout
+
+
+def test_app_and_library_versions_match() -> None:
+    """库与应用一起发版:两处 ``__version__`` 必须同步(防发版漏改)。"""
+    assert __version__ == lib_version
 
 
 def test_help_lists_all_commands() -> None:

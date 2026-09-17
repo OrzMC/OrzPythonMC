@@ -30,6 +30,7 @@ from orzmc.services.selfupdate import (
     normalize_tag,
     version_key,
 )
+from orzmc.version import __version__ as REAL_VERSION
 
 # Minimal payloads that satisfy the magic sniffing on each platform.
 _ELF = b"\x7fELF" + b"\x00" * 60
@@ -38,6 +39,20 @@ _PE = b"MZ" + b"\x00" * 62
 
 def _payload() -> bytes:
     return _PE if os.name == "nt" else _ELF
+
+
+def _newer_tag() -> str:
+    """一个高于当前版本的 tag。推导而非写死,免得每次发版都要改测试。
+
+    读的是库的 ``version.py``(而非 ``selfupdate.__version__``),这样
+    ``running_version`` fixture 改了"二进制内嵌版本"也不会影响这两个 helper。
+    """
+    major, minor, _patch = version_key(REAL_VERSION)
+    return f"v{major}.{minor + 1}.0"
+
+
+def _current_tag() -> str:
+    return f"v{REAL_VERSION}"
 
 
 @pytest.fixture(autouse=True)
@@ -192,19 +207,19 @@ class TestCheck:
         fs, binary = _install(tmp_path)
         http = FakeHttp()
         updater = SelfUpdater(http=http, fs=fs, binary=binary)
-        check = updater.check("2.1.0")
-        assert check.latest == "v2.1.0"
-        assert check.current == f"v{selfupdate.__version__}"
-        assert check.url == f"{DOWNLOAD_BASE}/v2.1.0/{check.asset}"
+        check = updater.check(_newer_tag().lstrip("v"))
+        assert check.latest == _newer_tag()
+        assert check.current == _current_tag()
+        assert check.url == f"{DOWNLOAD_BASE}/{_newer_tag()}/{check.asset}"
         assert check.available is True
         assert http.json_calls == []
 
     def test_latest_release_from_github(self, tmp_path) -> None:
         fs, binary = _install(tmp_path)
         http = FakeHttp()
-        http.json_responses = {API_LATEST: {"tag_name": "v2.1.0"}}
+        http.json_responses = {API_LATEST: {"tag_name": _newer_tag()}}
         check = SelfUpdater(http=http, fs=fs, binary=binary).check()
-        assert (check.latest, check.available) == ("v2.1.0", True)
+        assert (check.latest, check.available) == (_newer_tag(), True)
         assert http.json_calls == [API_LATEST]
 
     def test_api_failure_suggests_an_explicit_version(self, tmp_path) -> None:
@@ -349,24 +364,24 @@ class TestUpdateFromNetwork:
         fs, binary = _install(tmp_path)
         asset, _tag = asset_for()
         http = FakeHttp()
-        http.json_responses = {API_LATEST: {"tag_name": "v2.1.0"}}
+        http.json_responses = {API_LATEST: {"tag_name": _newer_tag()}}
         http.canned = {asset: _payload()}
         process, reporter = FakeProcess(), FakeReporter()
         result = _updater(fs, binary, http, reporter=reporter, sink=FakeSink(), process=process).update(yes=True)
         assert result is not None and result.applied is True
-        assert [url for _, url in http.requests] == [f"{DOWNLOAD_BASE}/v2.1.0/{asset}"]
+        assert [url for _, url in http.requests] == [f"{DOWNLOAD_BASE}/{_newer_tag()}/{asset}"]
         _run_applier(process, binary)
         assert fs.read_text(binary) == _payload().decode("latin-1")
         found = InstallManifest.find(fs, binary=binary)
         assert found is not None
-        assert found[1].version == "v2.1.0"
-        assert found[1].source == f"{DOWNLOAD_BASE}/v2.1.0/{asset}"
+        assert found[1].version == _newer_tag()
+        assert found[1].source == f"{DOWNLOAD_BASE}/{_newer_tag()}/{asset}"
 
     def test_already_latest_skips_the_download(self, tmp_path, running_version) -> None:
-        fs, binary = _install(tmp_path, version="v2.1.0")
-        running_version("2.1.0")
+        fs, binary = _install(tmp_path, version=_current_tag())
+        running_version(REAL_VERSION)
         http = FakeHttp()
-        http.json_responses = {API_LATEST: {"tag_name": "v2.1.0"}}
+        http.json_responses = {API_LATEST: {"tag_name": _current_tag()}}
         reporter = FakeReporter()
         result = _updater(fs, binary, http, reporter=reporter).update(yes=True)
         assert result is not None and result.applied is False
@@ -374,10 +389,12 @@ class TestUpdateFromNetwork:
         assert any("已是最新版本" in text for text in reporter.texts)
 
     def test_local_version_newer_than_latest_is_kept(self, tmp_path, running_version) -> None:
-        fs, binary = _install(tmp_path, version="v9.0.0")
-        running_version("9.0.0")
+        major, _minor, _patch = version_key(REAL_VERSION)
+        local = f"{major + 1}.0.0"
+        fs, binary = _install(tmp_path, version=f"v{local}")
+        running_version(local)
         http = FakeHttp()
-        http.json_responses = {API_LATEST: {"tag_name": "v2.1.0"}}
+        http.json_responses = {API_LATEST: {"tag_name": _newer_tag()}}
         reporter = FakeReporter()
         result = _updater(fs, binary, http, reporter=reporter).update(yes=True)
         assert result is not None and result.applied is False
@@ -397,7 +414,7 @@ class TestUpdateFromNetwork:
     def test_download_failure_leaves_the_binary_intact(self, tmp_path) -> None:
         fs, binary = _install(tmp_path)
         http = FakeHttp()
-        http.json_responses = {API_LATEST: {"tag_name": "v2.1.0"}}
+        http.json_responses = {API_LATEST: {"tag_name": _newer_tag()}}
         process = FakeProcess()
         with pytest.raises(RuntimeError, match="下载"):
             _updater(fs, binary, http, process=process).update(yes=True)
