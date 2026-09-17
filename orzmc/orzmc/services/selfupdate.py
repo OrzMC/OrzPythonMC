@@ -372,6 +372,9 @@ class SelfUpdater:
         """
         command = applier_command(staged, self._binary, os.getpid())
         log = os.path.join(os.path.dirname(self._binary), UPDATE_LOG_NAME)
+        # Fresh log per attempt: a stale DONE from a previous upgrade must never
+        # be mistaken for this one's outcome (the acceptance harness polls it).
+        self._fs.remove(log)
         try:
             self._process.run_detached(command, cwd=os.path.dirname(self._binary), log_path=log)
         except OSError as exc:
