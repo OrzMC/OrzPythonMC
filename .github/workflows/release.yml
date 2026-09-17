@@ -57,8 +57,10 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
+          # 用 FETCH_HEAD 而不是 origin/main:手动 dispatch 时 checkout 落在 tag 上,
+          # 那种 checkout 不一定有 refs/remotes/origin/main(实测报 unbound/unknown revision)。
           git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
             echo "::error::tag $TAG points at a commit that is not on main — release from main only."
             exit 1
           fi
