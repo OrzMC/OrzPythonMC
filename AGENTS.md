@@ -92,6 +92,8 @@ python/                         # uv workspace 根
 - 字段:`tool schema version platform install_dir binary source path_file path_line root_dir`;可选字段为空则不写行。Windows 不写 `path_file`,`path_line` 记 install_dir token(卸载只按 token 从 User PATH 移除)。
 - **PS 5.1 `Set-Content -Encoding UTF8` 写 BOM**,库侧读取一律 `utf-8-sig`。
 
+**最新版解析的限流兜底**:两个安装器与库都首选 GitHub REST API(`api.github.com/.../releases/latest`,60 次/时/**IP**),失败或限流时退回 `https://github.com/<repo>/releases/latest` 的 **302 `Location`**(非 API 端点,不限流),再自行拼资产地址。CI runner 与共享 NAT 用户必然吃限流,这条兜底是产品可用性路径而非可选优化。`install.sh` 用 `curl -sS -o /dev/null -w '%{redirect_url}'`(**不能带 `-L`**:跟随完重定向后 `%{redirect_url}` 是空串);`install.ps1` 用 `[System.Net.WebRequest]::Create(...).AllowAutoRedirect = $false` 读 `Location`;库侧 `HttpClient.head_location()` + `selfupdate._tag_from_redirect()`。两个安装器另有 `ORZMC_API_LATEST` 接缝(测试/镜像):指向不可用地址即可验证兜底,`scripts/accept_selfupdate.py` 有对应 case。
+
 **`docs/install.sh`(严格 POSIX sh)**:`set -eu`;无数组 / 无 `[[ ]]` / 无 `&>` / 无 `sed -i` / 无 jq,环境变量一律 `${VAR:-default}`。下载产物 magic 校验(`od -An -tx1 -N4`:Mach-O `cffaedfe` / ELF `7f454c46`;HTML/JSON 拒绝)。PATH 登记用 `$SHELL` 选 `.zshrc`/`.bashrc`/`.profile`,运行期 `case ":$PATH:"` 判已在 + `grep -Fqx` 判行重复,卸载用 `grep -Fvx` 删精确行(仅当行存在才写回)。选项:`--version vX.Y.Z`(固定版本,绕过 GitHub API 限流)/ `--dir` / `--no-modify-rc`(或 `ORZMC_NO_RC=1`)/ `--file`(本地安装,测试接缝)/ `--uninstall`(shell 兜底)。
 
 **`docs/install.ps1`(PowerShell 5.1+)**:

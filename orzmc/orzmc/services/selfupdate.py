@@ -56,6 +56,16 @@ _EXEC_MAGIC: tuple[bytes, ...] = (
 _WAIT_TICKS = 300  # helper gives up after ~60s of waiting for us to exit
 
 
+def _tag_from_redirect(http: HttpClient) -> str:
+    """Resolve the newest release tag without the API (302 Location)."""
+    location = http.head_location(f"https://github.com/{REPO}/releases/latest")
+    marker = "/releases/tag/"
+    if not location or marker not in location:
+        return ""
+    tag = location.split(marker, 1)[1].split("/")[0].split("?")[0].strip()
+    return normalize_tag(tag) if tag else ""
+
+
 def applier_command(staged: str, binary: str, pid: int, log: str) -> list[str]:
     """Command for the detached helper: swap ``staged`` in, once safe.
 
@@ -250,16 +260,26 @@ class SelfUpdater:
         )
 
     def _latest_tag(self) -> str:
+        """Latest release tag: GitHub API first, ``/releases/latest`` redirect as fallback.
+
+        The REST API allows only 60 requests/hour/IP and CI runners (or users
+        behind shared NAT) regularly hit that limit; the redirect endpoint is
+        not rate limited, so a rate-limited install still resolves.
+        """
         try:
             data = self._http.get_json(API_LATEST, headers=api_headers())
         except Exception as exc:
+            self._reporter.debug(f"GitHub API 不可用({exc}),回退 releases/latest 重定向")
+        else:
+            tag = (data or {}).get("tag_name") if isinstance(data, dict) else None
+            if tag:
+                return str(tag)
+        tag = _tag_from_redirect(self._http)
+        if not tag:
             raise RuntimeError(
                 "无法获取最新版本信息(网络问题或 GitHub API 限流)。请指定版本重试:orzmc update --version vX.Y.Z"
-            ) from exc
-        tag = (data or {}).get("tag_name") if isinstance(data, dict) else None
-        if not tag:
-            raise RuntimeError("GitHub 返回的发布信息中没有版本标签,请用 --version 指定版本")
-        return str(tag)
+            )
+        return tag
 
     # ── update ──────────────────────────────────────────────────────────────
 

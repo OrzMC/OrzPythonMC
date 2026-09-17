@@ -219,9 +219,11 @@ class Sandbox:
         self.install_dir = self.root / "bin"
         self.oneline_dir = self.root / "bin-oneline"
         self.iex_dir = self.root / "bin-iex"
+        self.fallback_dir = self.root / "bin-fallback"
         self.state_base = self.root / "state"
         self.oneline_state_base = self.root / "state-oneline"
         self.iex_state_base = self.root / "state-iex"
+        self.fallback_state_base = self.root / "state-fallback"
         self.game_root = self.root / "minecraft"
         self.keep = keep
         self.binary = self.install_dir / BINARY_NAME
@@ -254,6 +256,14 @@ class Sandbox:
             "XDG_STATE_HOME": str(self.iex_state_base),
             "LOCALAPPDATA": str(self.iex_state_base),
             "ORZMC_BIN": str(self.iex_dir),
+        }
+
+    def env_fallback(self) -> dict[str, str]:
+        """Isolation for the rate-limit-fallback install (its own record/dir)."""
+        return {
+            **self.env(),
+            "XDG_STATE_HOME": str(self.fallback_state_base),
+            "LOCALAPPDATA": str(self.fallback_state_base),
         }
 
     def install_local(self, powershell: str) -> subprocess.CompletedProcess[str]:
@@ -516,6 +526,13 @@ def step_oneline(sandbox: Sandbox, powershell: str, skip: bool, skip_download: b
                     env={**sandbox.env_iex(), "ORZMC_INSTALL_URL": url},
                 )
                 _check_piped(literal, sandbox.iex_dir, sandbox.iex_state_base, f"字面 {label}")
+                _check_fallback(
+                    powershell,
+                    url,
+                    sandbox,
+                    f"& ([scriptblock]::Create((irm '{url}'))) -dir '{sandbox.fallback_dir}' -no-modify-rc",
+                    "scriptblock(API 限流→302 兜底)",
+                )
             return
         if not shutil.which("curl"):
             say("  已跳过(无 curl)")
@@ -523,7 +540,39 @@ def step_oneline(sandbox: Sandbox, powershell: str, skip: bool, skip_download: b
         url = f"{base}/install.sh"
         piped = f"curl -fsSL '{url}' | sh -s -- --file '{BUILT_BINARY}' --dir '{sandbox.oneline_dir}' --no-modify-rc"
         result = run(["sh", "-c", piped], env=sandbox.env_oneline())
+        if not skip_download:
+            _check_fallback(
+                None,
+                url,
+                sandbox,
+                f"curl -fsSL '{url}' | sh -s -- --dir '{sandbox.fallback_dir}' --no-modify-rc",
+                "curl | sh(API 限流→302 兜底)",
+            )
     _check_piped(result, sandbox.oneline_dir, sandbox.oneline_state_base, label)
+
+
+#: Points the installer's API at a dead port so the 302 fallback must kick in.
+DEAD_API = "http://127.0.0.1:9/api-rate-limited"
+
+
+def _check_fallback(powershell: str | None, url: str, sandbox: Sandbox, command: str, label: str) -> None:
+    """Install with the GitHub API unreachable — the 302 endpoint must save it.
+
+    The REST API allows 60 requests/hour/IP and CI runners (and users behind
+    shared NAT) hit that regularly; the redirect endpoint is not rate limited.
+    """
+    if powershell is None:
+        result = run(["sh", "-c", command], env={**sandbox.env_fallback(), "ORZMC_API_LATEST": DEAD_API})
+    else:
+        result = run(
+            ps_command(powershell, command),
+            env={**sandbox.env_fallback(), "ORZMC_API_LATEST": DEAD_API},
+        )
+    _check_piped(result, sandbox.fallback_dir, sandbox.fallback_state_base, label)
+    record = sandbox.fallback_state_base / "orzmc" / "install.conf"
+    content = record.read_text(encoding="utf-8-sig") if record.is_file() else ""
+    version = next((line.split("=", 1)[1] for line in content.splitlines() if line.startswith("version=")), "")
+    check(f"管道安装({label})从 302 兜底拿到版本号", version.startswith("v"), f"version={version}")
 
 
 def _check_piped(result: subprocess.CompletedProcess[str], install_dir: Path, state_base: Path, label: str) -> None:
