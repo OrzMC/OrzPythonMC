@@ -165,7 +165,10 @@ class TestApplierCommand:
         cmd = applier_command(r"C:\bin\.orzmc-update.tmp", r"C:\bin\orzmc.exe", 4242)
         assert cmd[0] == "powershell"
         script = cmd[-1]
-        assert "Get-Process -Id 4242" in script  # waits for our pid
+        # No pid liveness polling on Windows: the OS itself refuses to replace a
+        # running exe, so retrying until it succeeds is both safe and reliable.
+        assert "Get-Process" not in script
+        assert "while ($i -lt" in script
         assert "Move-Item -Force" in script
         # -ErrorAction Stop is essential: without it a failed move is a
         # non-terminating error, the copy fallback never runs, and the helper

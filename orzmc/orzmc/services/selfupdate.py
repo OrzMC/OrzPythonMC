@@ -57,26 +57,25 @@ _WAIT_TICKS = 300  # helper gives up after ~60s of waiting for us to exit
 
 
 def applier_command(staged: str, binary: str, pid: int) -> list[str]:
-    """Command for the detached helper: wait for ``pid`` to exit, then swap.
+    """Command for the detached helper: swap ``staged`` in, once safe.
 
-    POSIX uses ``/bin/sh`` (always present); Windows uses ``powershell`` (5.1+,
-    present on every supported release). Both wait for the process they are
-    replacing — the file must stay *valid* for its lazy archive reads until it
-    exits, and on Windows it is also still open.
+    POSIX waits for ``pid`` (the process being replaced) to exit, because
+    ``mv`` over a running binary *succeeds* — and the running process must keep
+    reading its own archive until it is gone.
 
-    Windows then retries the swap: ``Move-Item`` is preferred (rename semantics),
-    with a copy+delete fallback, and ``-ErrorAction Stop`` so a failure is
-    catchable at all (a non-terminating error would silently skip the fallback —
-    CI caught exactly that). The helper prints one terminal ``DONE``/``FAILED``
-    line, which is logged next to the binary for diagnosis.
+    Windows needs no pid liveness check: the OS refuses to delete/replace a
+    running ``.exe``, so a plain retry loop can only succeed after that process
+    exits. Polling `Get-Process -Id` there proved unreliable (CI: the helper sat
+    in the wait loop printing nothing), and the retry loop also covers a
+    transient lock right after the process goes away. ``Move-Item`` first
+    (rename semantics) with a copy+delete fallback, and ``-ErrorAction Stop`` so
+    the fallback is reachable at all.
     """
     if os.name == "nt":
         src, dst = _ps_quote(staged), _ps_quote(binary)
         body = (
             f"$s='{src}'; $t='{dst}'; $i=0; "
-            f"while ((Get-Process -Id {pid} -ErrorAction SilentlyContinue) -and ($i -lt {_WAIT_TICKS})) "
-            f"{{ Start-Sleep -Milliseconds 200; $i++ }}; "
-            f"while ($i -lt {_WAIT_TICKS + 150}) {{ "
+            f"while ($i -lt {_WAIT_TICKS}) {{ "
             f"try {{ Move-Item -Force -LiteralPath $s -Destination $t -ErrorAction Stop; "
             f"if (-not (Test-Path -LiteralPath $s)) {{ Write-Output 'DONE'; exit 0 }} }} "
             f"catch {{ try {{ [IO.File]::Copy($s, $t, $true); "

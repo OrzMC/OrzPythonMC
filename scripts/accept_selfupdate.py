@@ -285,9 +285,30 @@ class Sandbox:
         shutil.rmtree(self.root, ignore_errors=True)
 
 
+def staged_site(sandbox: Sandbox) -> Path:
+    """A copy of ``docs/`` shaped like the deployed GitHub Pages artifact.
+
+    ``pages.yml`` strips the UTF-8 BOM from ``install.ps1`` before uploading;
+    the repo file keeps it so PS 5.1 can read the script with ``-File``. Serving
+    the repo file here would test a shape users never get, and the first line
+    would become a bogus command ("The term 'Windows' is not recognized" — the
+    very failure d4e049b fixed). Mirror the deploy step instead, and assert both
+    halves of that pair.
+    """
+    site = sandbox.root / "site"
+    shutil.rmtree(site, ignore_errors=True)
+    shutil.copytree(ROOT / "docs", site)
+    served = site / "install.ps1"
+    body = served.read_bytes()
+    check("仓库 install.ps1 保留 UTF-8 BOM(-File 需要)", body.startswith(b"\xef\xbb\xbf"))
+    served.write_bytes(body[3:] if body.startswith(b"\xef\xbb\xbf") else body)
+    check("部署形态已剥 BOM(镜像 pages.yml)", not served.read_bytes().startswith(b"\xef\xbb\xbf"))
+    return site
+
+
 @contextlib.contextmanager
-def serve_docs() -> Iterator[str]:
-    """Serve ``docs/`` on loopback with GitHub-Pages-like content types.
+def serve_docs(directory: Path) -> Iterator[str]:
+    """Serve ``directory`` on loopback with GitHub-Pages-like content types.
 
     ``.ps1`` has no MIME mapping, so ``http.server`` answers
     ``application/octet-stream`` — exactly what GitHub Pages does, which is what
@@ -299,7 +320,7 @@ def serve_docs() -> Iterator[str]:
         def log_message(self, *args: object) -> None:  # keep the harness output clean
             pass
 
-    handler = functools.partial(_QuietHandler, directory=str(ROOT / "docs"))
+    handler = functools.partial(_QuietHandler, directory=str(directory))
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -468,7 +489,7 @@ def step_oneline(sandbox: Sandbox, powershell: str, skip: bool, skip_download: b
     if skip:
         say("  已跳过(--skip-oneline)")
         return
-    with serve_docs() as base:
+    with serve_docs(staged_site(sandbox)) as base:
         if IS_WINDOWS:
             url = f"{base}/install.ps1"
             # Diagnostic: what does `irm` hand back for an octet-stream .ps1 here?
