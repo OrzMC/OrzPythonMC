@@ -86,6 +86,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # gh release 需要 git 仓库上下文(否则 fatal: not a git repository);
+      # --generate-notes 还要历史来算 diff。
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
       - name: Ensure a draft release exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -198,6 +204,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 同上:gh release / gh workflow run 都需要仓库上下文。
+      - uses: actions/checkout@v7
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
