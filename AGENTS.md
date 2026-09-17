@@ -52,7 +52,7 @@ python/                         # uv workspace 根
   .github/{dependabot.yml,PULL_REQUEST_TEMPLATE.md}  release-please-config.json
   .release-please-manifest.json  CHANGELOG.md(机器人维护)  CONTRIBUTING.md
   scripts/{build,acceptance,accept_selfupdate}.py
-  docs/index.html                # 官网(静态单页,GitHub Pages 托管)
+  docs/index.html                # 官网(静态单页,GitHub Pages 托管;最新版 tag 部署期注入)
   docs/install.sh  install.ps1   # 一键安装器(Unix sh / Windows PowerShell)
   docs/installer-design.md       # 安装器方案设计(历史评审稿,参考)
   orzmc/                        # 库包(name="orzmc",py.typed)
@@ -167,6 +167,7 @@ uv lock                            # 锁定依赖
 - **版本号不手改**:`orzmc/version.py` 与 `orzmc_app/orzmc_app/__init__.py` 都带 `# x-release-please-version` 标记,由 release-please 的 release PR 一起 bump(两个文件锁步,`test_app_and_library_versions_match` 守着);`release-please-config.json` 用 generic updater 改这两处,`.release-please-manifest.json` 记录上一次发布的版本。因为两个 pyproject 都是 `dynamic`,`uv.lock` **不记录本地包版本**,release PR 不需要动 lock。
 - **版本策略(预稳定期)**:2.x 的破坏性 API 变更**不用** `feat!`/`BREAKING CHANGE:`(release-please 会直接推 major),走 minor + 在 `CHANGELOG.md` 里人工注明;等 API 冻结为 3.0.0 时再启用 `!`。
 - 依赖与 Actions 升级交给 `.github/dependabot.yml`(每周一,分组);`CONTRIBUTING.md` + PR 模板给人和 AI 智能体同一份清单。
+- **发布链路的一致性由测试锁死**(`orzmc_app/tests/test_release_consistency.py`):官网资产名 == 库 `asset_for()` == `release.yml` 矩阵产物名(去 `.exe`)、下载基线一致、pages 注入步与占位符成对、tag/版本护栏仍在、两处版本文件的 `x-release-please-version` 标记与 release-please 的 `extra-files` 一致。改任一处而漏改其余,测试即红。
 - 夜间验收失败会自动开/追加 issue(`acceptance.yml` 的 `notify` job),不再依赖人盯。
 
 ## 改动流程
@@ -190,7 +191,7 @@ uv lock                            # 锁定依赖
   - **判定语义**:`PASS`(server 日志 `Done (` / client 退出码 0 引导级);`UP(no Done)`(端口开 90s 无 Done = Mojang MC-263542 世界生成卡死,记警告不判失败);`SKIP`(日志含"不支持 Minecraft"/"未找到 Minecraft",类型暂未适配该版本,如 Forge 滞后);`UP(gap)`(上游无该平台产物:Adoptium 对某 OS/arch/major 的 Temurin 返回 404,或 Mojang 无该 arch 的 lwjgl natives —— 记警告不判失败,上游补齐后自动恢复真实判定);`FAIL`/`TIMEOUT` 判失败。客户端引导级判定依赖 Linux `xvfb-run`,headless 需装 xvfb;`--deep-client` 仅真机手动用(CI 的 macOS/Windows 无 GL 上下文会假阴性)。
   - 游戏 root 按 `runner.os`-`runner.arch` 缓存(Java + assets + jars),夜间只取增量。
 - **`release.yml`(打 `v*` 标签)**:`quality` 复用 `ci.yml` 传 `skip-test-matrix: true`(6 平台 pytest 已在 main 跑过);`binary` 6 组合构建挂 GitHub Release;`pypi` 双包发布。
-- **`pages.yml`(push main 且 `docs/**` 或工作流自身变更 + workflow_dispatch)**:静态官网(自包含单页 `docs/index.html`,无外部构建)用 `actions/configure`/`upload-pages-artifact`/`deploy-pages` 部署到 GitHub Pages,站点地址 <https://orzmc.github.io/OrzPythonMC/>;`permissions: pages: write + id-token: write`,`concurrency: group=pages` 防止并发部署互相踩。页面内下载小组件直接调 `api.github.com/repos/OrzMC/OrzPythonMC/releases/latest` 拉取最新发布,自动按平台给出下载链接 —— 改动 `docs/` 推送即自动更新。
+- **`pages.yml`(push main 且 `docs/**`/工作流自身变更、`release: published`、workflow_dispatch)**:**官网「最新版」在部署期注入** —— `index.html` 里是占位符 `__ORZMC_LATEST_TAG__`,部署前用**非 API 的 302**(`curl -sS -o /dev/null -w '%{redirect_url}'`,同样**不能带 `-L`**)解析最新 tag 后 `sed` 替换;浏览器端**不再调用 `api.github.com`**(60 次/时/IP,限流会让整个下载列表消失;读不到注入值时页面才退回 API,再失败才显示 Releases 链接),六个平台的下载地址按 `DOWNLOAD_BASE/<tag>/<asset>` 直接拼。`release: published` 触发是必需的:否则发版后官网会一直显示旧版本,直到下次 docs 变更。发布配置说明:静态官网(自包含单页 `docs/index.html`,无外部构建)用 `actions/configure`/`upload-pages-artifact`/`deploy-pages` 部署到 GitHub Pages,站点地址 <https://orzmc.github.io/OrzPythonMC/>;`permissions: pages: write + id-token: write`,`concurrency: group=pages` 防止并发部署互相踩。页面内下载小组件直接调 `api.github.com/repos/OrzMC/OrzPythonMC/releases/latest` 拉取最新发布,自动按平台给出下载链接 —— 改动 `docs/` 推送即自动更新。
 
 ## 发布
 
