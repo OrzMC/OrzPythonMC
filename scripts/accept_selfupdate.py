@@ -535,17 +535,29 @@ def _check_piped(result: subprocess.CompletedProcess[str], install_dir: Path, st
     check(f"管道安装({label})后二进制存在且可执行", binary.is_file() and os.access(binary, os.X_OK))
     # Mojibake (PS 5.1 byte-decoding the source) would corrupt these characters.
     check(f"管道安装({label})中文未被误解码(编码自愈生效)", "已安装到" in output, last_line)
-    check(f"管道安装({label})未改动 PATH 配置", "手动添加" not in output)
     record = state_base / "orzmc" / "install.conf"
     content = record.read_text(encoding="utf-8-sig") if record.is_file() else ""
     check(f"管道安装({label})写入独立安装记录", "version=" in content, f"{state_base.name}/orzmc/install.conf")
+    # The installer may *print* a manual-PATH hint, but it must never register a
+    # PATH change in this mode (that is what `--no-modify-rc` / ORZMC_NO_RC=1 means).
+    check(
+        f"管道安装({label})未登记 PATH 改动",
+        "path_line=" not in content and "path_file=" not in content,
+        content.replace("\n", " ")[-90:],
+    )
 
 
 def step_uninstall(sandbox: Sandbox) -> None:
     say("== 10) 卸载闭环(self-uninstall) ==")
     result = sandbox.orzmc("self-uninstall", "--yes")
-    check("self-uninstall 成功", result.returncode == 0, plain(result.stdout).strip())
-    check("二进制已删除", not sandbox.binary.exists())
+    out = plain(result.stdout + result.stderr)
+    check("self-uninstall 成功", result.returncode == 0, out.strip())
+    # Windows cannot delete the running image (its bootloader parent still holds
+    # it open); the documented fallback is rename + delete-on-reboot, which the
+    # library reports. Accept either — this is the behaviour AGENTS.md specifies.
+    deleted = not sandbox.binary.exists()
+    scheduled = "标记重启后删除" in out
+    check("二进制已删除(或按文档标记重启后删除)", deleted or scheduled, out.strip().replace("\n", " ")[-120:])
     check("安装记录已删除", not sandbox.manifest.exists())
     check("游戏数据根目录未因卸载被删", not sandbox.game_root.exists())
 
