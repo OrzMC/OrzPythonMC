@@ -31,7 +31,7 @@ from orzmc.infra.http import HttpClient
 from orzmc.infra.log import NullReporter, Reporter
 from orzmc.infra.progress import NullProgress, ProgressSink
 from orzmc.infra.runner import ProcessRunner
-from orzmc.infra.transfer import download_with_progress
+from orzmc.infra.transfer import PARALLEL_PARTS, download_with_progress
 from orzmc.services.selfinstall import InstallManifest, is_pip_managed, looks_like_dev
 from orzmc.version import __version__
 
@@ -371,7 +371,12 @@ class SelfUpdater:
             assert check.url is not None
             try:
                 download_with_progress(
-                    self._http, check.url, staged, self._sink, f"下载 orzmc {check.latest} ({check.asset})"
+                    self._http,
+                    check.url,
+                    staged,
+                    self._sink,
+                    f"下载 orzmc {check.latest} ({check.asset})",
+                    parts=PARALLEL_PARTS,
                 )
             except Exception as exc:
                 raise RuntimeError(f"下载 {check.asset} 失败: {exc}") from exc

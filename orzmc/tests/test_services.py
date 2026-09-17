@@ -36,6 +36,7 @@ from orzmc.core.server.paper import PaperAPI
 from orzmc.domain.libraries import os_arch, os_key
 from orzmc.infra.cache import MetadataCache
 from orzmc.infra.http import SMALL_FILE_READ_TIMEOUT
+from orzmc.infra.transfer import PARALLEL_PARTS
 from orzmc.services.java import JavaEnv
 
 
@@ -324,6 +325,19 @@ class TestDownloadConcurrency:
         services = _services(tmp_path, reporter, sink, http)
         services.downloader._download_missing([("https://assets/a", str(tmp_path / "a"), None)], "批量")
         assert [kw["timeout"] for kw in http.download_kwargs] == [SMALL_FILE_READ_TIMEOUT]
+
+    def test_large_file_parts_follow_the_concurrency_setting(self, tmp_path, reporter, sink) -> None:
+        # 大文件走分块并行(客户端 jar / JRE / 自升级二进制);-j 1 表示「不要并行」,
+        # 分块也跟着关掉。
+        assert _services(tmp_path, reporter, sink, FakeHttp()).downloader._parts == PARALLEL_PARTS
+        assert _services(tmp_path, reporter, sink, FakeHttp(), download_threads=1).downloader._parts == 1
+
+    def test_java_env_gets_the_same_parts_setting(self, tmp_path, reporter, sink) -> None:
+        # JRE 归档 40MB+ —— 它走 download_with_progress 的分块路径。
+        services = Services(
+            RuntimeOptions(root_dir=str(tmp_path), version="1.20.4", download_threads=8), reporter=reporter, sink=sink
+        )
+        assert services.java_env._parts == PARALLEL_PARTS
 
 
 class TestServerService:

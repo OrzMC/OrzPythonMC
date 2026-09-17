@@ -15,6 +15,7 @@ from orzmc.infra.http import DEFAULT_POOL_SIZE, HttpClient
 from orzmc.infra.log import NullReporter, Reporter
 from orzmc.infra.progress import NullProgress, ProgressSink
 from orzmc.infra.runner import ProcessRunner
+from orzmc.infra.transfer import PARALLEL_PARTS
 from orzmc.services.downloader import Downloader
 from orzmc.services.java import JavaEnv
 
@@ -64,7 +65,14 @@ class Services:
         self.downloader = Downloader(
             self.http, self.fs, self.reporter, self.sink, paths, workers=options.download_threads
         )
-        self.java_env = JavaEnv(self.http, self.fs, self.reporter, self.sink, paths)
+        self.java_env = JavaEnv(
+            self.http,
+            self.fs,
+            self.reporter,
+            self.sink,
+            paths,
+            parts=1 if options.download_threads <= 1 else PARALLEL_PARTS,
+        )
         # One metadata cache per invocation: it carries the library-wide TTL and
         # the CLI ``--refresh`` flag, so every remote API (Mojang / Fabric /
         # Paper / Forge) shares one refresh + TTL policy.
