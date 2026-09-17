@@ -152,7 +152,7 @@ class TestApplierCommand:
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX helper")
     def test_posix_helper_waits_for_the_pid_then_renames(self) -> None:
-        cmd = applier_command("/bin/.orzmc-update.tmp", "/bin/orzmc", 4242)
+        cmd = applier_command("/bin/.orzmc-update.tmp", "/bin/orzmc", 4242, "/bin/.orzmc-update.log")
         assert cmd[:2] == ["/bin/sh", "-c"]
         assert cmd[-3:] == ["4242", "/bin/.orzmc-update.tmp", "/bin/orzmc"]
         script = cmd[2]
@@ -162,12 +162,13 @@ class TestApplierCommand:
 
     def test_windows_helper_uses_powershell_and_waits(self, monkeypatch) -> None:
         monkeypatch.setattr(os, "name", "nt")
-        cmd = applier_command(r"C:\bin\.orzmc-update.tmp", r"C:\bin\orzmc.exe", 4242)
+        cmd = applier_command(r"C:\bin\.orzmc-update.tmp", r"C:\bin\orzmc.exe", 4242, r"C:\bin\.orzmc-update.log")
         assert cmd[0] == "powershell"
         script = cmd[-1]
-        # No pid liveness polling on Windows: the OS itself refuses to replace a
-        # running exe, so retrying until it succeeds is both safe and reliable.
-        assert "Get-Process" not in script
+        # No pid *wait loop* on Windows: the OS itself refuses to replace a
+        # running exe, so retrying until it succeeds is both safe and reliable
+        # (Get-Process only appears in the one-off diagnostic breadcrumb).
+        assert "while ((Get-Process" not in script
         assert "while ($i -lt" in script
         assert "Move-Item -Force" in script
         # -ErrorAction Stop is essential: without it a failed move is a
@@ -175,12 +176,14 @@ class TestApplierCommand:
         # silently leaves the staged file behind (CI caught exactly that).
         assert "Move-Item -Force -LiteralPath $s -Destination $t -ErrorAction Stop" in script
         assert "[IO.File]::Copy($s, $t, $true)" in script
-        assert "'DONE'" in script and "'FAILED'" in script
+        assert "$t + '.old'" in script  # rename-aside fallback
+        assert "Add-Content -LiteralPath $l -Value ('attempt '" in script  # breadcrumbs in the log
+        assert "'DONE (move)'" in script and "'FAILED'" in script
         assert r"'C:\bin\.orzmc-update.tmp'" in script
 
     def test_windows_helper_escapes_single_quotes(self, monkeypatch) -> None:
         monkeypatch.setattr(os, "name", "nt")
-        cmd = applier_command("/tmp/it's/.orzmc-update.tmp", "/tmp/it's/orzmc", 1)
+        cmd = applier_command("/tmp/it's/.orzmc-update.tmp", "/tmp/it's/orzmc", 1, "/tmp/it's/.orzmc-update.log")
         assert "'/tmp/it''s/.orzmc-update.tmp'" in cmd[-1]
 
 

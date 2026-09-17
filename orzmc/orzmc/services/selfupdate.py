@@ -56,32 +56,43 @@ _EXEC_MAGIC: tuple[bytes, ...] = (
 _WAIT_TICKS = 300  # helper gives up after ~60s of waiting for us to exit
 
 
-def applier_command(staged: str, binary: str, pid: int) -> list[str]:
+def applier_command(staged: str, binary: str, pid: int, log: str) -> list[str]:
     """Command for the detached helper: swap ``staged`` in, once safe.
 
     POSIX waits for ``pid`` (the process being replaced) to exit, because
-    ``mv`` over a running binary *succeeds* — and the running process must keep
+    ``mv`` over a running binary *succeeds* — the running process must keep
     reading its own archive until it is gone.
 
-    Windows needs no pid liveness check: the OS refuses to delete/replace a
-    running ``.exe``, so a plain retry loop can only succeed after that process
-    exits. Polling `Get-Process -Id` there proved unreliable (CI: the helper sat
-    in the wait loop printing nothing), and the retry loop also covers a
-    transient lock right after the process goes away. ``Move-Item`` first
-    (rename semantics) with a copy+delete fallback, and ``-ErrorAction Stop`` so
-    the fallback is reachable at all.
+    Windows needs no liveness check: the OS refuses to replace a running
+    ``.exe``, so retrying can only succeed after that process exits (and the
+    retry also rides out a transient lock, e.g. immediate AV/indexer scans).
+    Three strategies are tried, in order: ``Move-Item`` (rename semantics),
+    an overwriting ``[IO.File]::Copy``, and a rename-aside move — one of them
+    works on every filesystem we have seen.
+
+    The helper logs each step to ``log`` itself (``Add-Content``): PowerShell
+    buffers redirected stdout until exit, so a hung helper used to be
+    indistinguishable from a dead one (CI showed empty logs).
     """
     if os.name == "nt":
-        src, dst = _ps_quote(staged), _ps_quote(binary)
+        src, dst, logf = _ps_quote(staged), _ps_quote(binary), _ps_quote(log)
         body = (
-            f"$s='{src}'; $t='{dst}'; $i=0; "
-            f"while ($i -lt {_WAIT_TICKS}) {{ "
+            f"$s='{src}'; $t='{dst}'; $l='{logf}'; $i=0; "
+            f"Add-Content -LiteralPath $l -Value ('start: pid={pid} alive=' + [bool](Get-Process -Id {pid} "
+            f"-ErrorAction SilentlyContinue)); "
+            f"while ($i -lt {_WAIT_TICKS}) {{ $err=''; "
             f"try {{ Move-Item -Force -LiteralPath $s -Destination $t -ErrorAction Stop; "
-            f"if (-not (Test-Path -LiteralPath $s)) {{ Write-Output 'DONE'; exit 0 }} }} "
-            f"catch {{ try {{ [IO.File]::Copy($s, $t, $true); "
-            f"Remove-Item -LiteralPath $s -Force -ErrorAction Stop; Write-Output 'DONE'; exit 0 }} "
-            f"catch {{ Write-Output ('retry: ' + $_.Exception.Message) }} }}; "
-            f"Start-Sleep -Milliseconds 200; $i++ }}; Write-Output 'FAILED'; exit 1"
+            f"if (-not (Test-Path -LiteralPath $s)) {{ Add-Content -LiteralPath $l -Value 'DONE (move)'; exit 0 }} }} "
+            f"catch {{ $err=$_.Exception.Message }} "
+            f"if (-not $err) {{ $err='move reported no error but staged file remains' }} "
+            f"try {{ [IO.File]::Copy($s, $t, $true); Remove-Item -LiteralPath $s -Force -ErrorAction Stop; "
+            f"Add-Content -LiteralPath $l -Value 'DONE (copy)'; exit 0 }} catch {{ }} "
+            f"try {{ $old=$t + '.old'; Move-Item -Force -LiteralPath $t -Destination $old -ErrorAction Stop; "
+            f"Move-Item -Force -LiteralPath $s -Destination $t -ErrorAction Stop; "
+            f"Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue; "
+            f"Add-Content -LiteralPath $l -Value 'DONE (rename-aside)'; exit 0 }} catch {{ }} "
+            f"Add-Content -LiteralPath $l -Value ('attempt ' + $i + ': ' + $err); "
+            f"Start-Sleep -Milliseconds 200; $i++ }}; Add-Content -LiteralPath $l -Value 'FAILED'; exit 1"
         )
         return ["powershell", "-NoProfile", "-NonInteractive", "-Command", body]
     script = (
@@ -369,8 +380,8 @@ class SelfUpdater:
         and it waits for *our* pid to disappear before touching the file we are
         still executing from.
         """
-        command = applier_command(staged, self._binary, os.getpid())
         log = os.path.join(os.path.dirname(self._binary), UPDATE_LOG_NAME)
+        command = applier_command(staged, self._binary, os.getpid(), log)
         # Fresh log per attempt: a stale DONE from a previous upgrade must never
         # be mistaken for this one's outcome (the acceptance harness polls it).
         self._fs.remove(log)

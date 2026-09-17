@@ -75,7 +75,7 @@ IS_WINDOWS = os.name == "nt"
 BINARY_NAME = "orzmc.exe" if IS_WINDOWS else "orzmc"
 BUILT_BINARY = ROOT / "dist" / BINARY_NAME
 STAGING_NAME = ".orzmc-update.tmp"
-SWAP_TIMEOUT = 30.0  # seconds to wait for the detached helper to rename
+SWAP_TIMEOUT = 75.0  # seconds to wait for the detached helper (it retries for ~60s)
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _checks: list[tuple[str, bool, str]] = []
 _verbose = False
