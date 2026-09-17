@@ -98,11 +98,33 @@ def die(message: str) -> NoReturn:
 
 
 def check(name: str, passed: bool, detail: str = "") -> bool:
-    """Record one acceptance verdict (kept going so every failure is visible)."""
+    """Record one acceptance verdict (kept going so every failure is visible).
+
+    A failing check prints its diagnostics *in full* (truncated): on CI the
+    interesting part (an installer error, a PowerShell exception, the helper's
+    log) is never the last line.
+    """
     _checks.append((name, passed, detail))
     mark = "OK  " if passed else "FAIL"
     say(f"  [{mark}] {name}" + (f" — {detail}" if detail else ""))
+    if not passed and detail and "\n" in detail:
+        for line in detail.splitlines()[:60]:
+            say(f"      | {line}")
     return passed
+
+
+def output_of(result: subprocess.CompletedProcess[str]) -> str:
+    """Everything a child said, for diagnostics."""
+    return plain(f"$ {result.args}\n--- exit {result.returncode} ---\n{result.stdout}{result.stderr}")
+
+
+def helper_log(install_dir: Path) -> str:
+    """The self-update helper's own log (it prints one terminal DONE/FAILED line)."""
+    log = install_dir / ".orzmc-update.log"
+    try:
+        return log.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return "(助手日志缺失)"
 
 
 def run(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -146,6 +168,17 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 256), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def wait_for_helper(install_dir: Path, timeout: float = SWAP_TIMEOUT) -> str:
+    """Wait for the detached helper's terminal line; returns its log."""
+    log = install_dir / ".orzmc-update.log"
+
+    def finished() -> bool:
+        return log.is_file() and any(marker in helper_log(install_dir) for marker in ("DONE", "FAILED"))
+
+    wait_for(finished, timeout)
+    return helper_log(install_dir)
 
 
 def wait_for(predicate, timeout: float = SWAP_TIMEOUT) -> bool:
@@ -361,9 +394,10 @@ def step_swap_from_file(sandbox: Sandbox) -> None:
     before = sha256(sandbox.binary)
     result = sandbox.orzmc("update", "--file", str(payload), "-v", "v9.9.9", "--yes")
     say(f"  {' '.join(plain(result.stdout + result.stderr).split())}")
-    check("update 命令成功交接", result.returncode == 0, f"exit={result.returncode}")
-    swapped = wait_for(lambda: sandbox.binary.is_file() and sha256(sandbox.binary) == sha256(payload))
-    check("助手已把目标文件换成新二进制(sha256 一致)", swapped)
+    check("update 命令成功交接", result.returncode == 0, output_of(result) if result.returncode else "exit=0")
+    log = wait_for_helper(sandbox.install_dir)
+    swapped = sandbox.binary.is_file() and sha256(sandbox.binary) == sha256(payload)
+    check("助手已把目标文件换成新二进制(sha256 一致)", swapped, f"助手日志: {log}")
     check("暂存文件已清理", not sandbox.staging.exists())
     check("旧文件确实被换掉", sha256(sandbox.binary) != before)
     record = sandbox.manifest.read_text(encoding="utf-8-sig")
@@ -379,9 +413,10 @@ def step_download(sandbox: Sandbox, latest: str, skip: bool, powershell: str) ->
     before = sha256(sandbox.binary)
     result = sandbox.orzmc("update", "-v", latest, "--yes")
     say(f"  {' '.join(plain(result.stdout + result.stderr).split())}")
-    check("真实下载升级命令成功", result.returncode == 0, f"exit={result.returncode}")
-    swapped = wait_for(lambda: sha256(sandbox.binary) != before and not sandbox.staging.exists())
-    check("下载的新二进制已落地且暂存已清理", swapped)
+    check("真实下载升级命令成功", result.returncode == 0, output_of(result) if result.returncode else "exit=0")
+    log = wait_for_helper(sandbox.install_dir)
+    swapped = sha256(sandbox.binary) != before and not sandbox.staging.exists()
+    check("下载的新二进制已落地且暂存已清理", swapped, f"助手日志: {log}")
     check("新二进制可运行", sandbox.orzmc("version").returncode == 0)
     record = sandbox.manifest.read_text(encoding="utf-8-sig")
     check("安装记录含 source(下载地址)", "source=https://github.com/" in record, record.replace("\n", " ")[-120:])
@@ -436,6 +471,16 @@ def step_oneline(sandbox: Sandbox, powershell: str, skip: bool, skip_download: b
     with serve_docs() as base:
         if IS_WINDOWS:
             url = f"{base}/install.ps1"
+            # Diagnostic: what does `irm` hand back for an octet-stream .ps1 here?
+            probe = run(
+                ps_command(
+                    powershell,
+                    f"$c = irm '{url}'; '{{0}}|len={{1}}|{{2}}' -f $c.GetType().Name, $c.Length, "
+                    f"($c -is [string] -and $c.TrimStart([char]0xFEFF).StartsWith('# OrzMC'))",
+                ),
+                env=sandbox.env(),
+            )
+            say(f"  irm 探针: {plain(probe.stdout + probe.stderr).strip()} (exit={probe.returncode})")
             body = (
                 f"& ([scriptblock]::Create((irm '{url}'))) -file '{BUILT_BINARY}' "
                 f"-dir '{sandbox.oneline_dir}' -no-modify-rc"
@@ -465,7 +510,7 @@ def _check_piped(result: subprocess.CompletedProcess[str], install_dir: Path, st
     binary = install_dir / BINARY_NAME
     output = plain(result.stdout + result.stderr)
     last_line = output.strip().splitlines()[-1] if output.strip() else ""
-    check(f"管道安装({label})成功", result.returncode == 0, f"exit={result.returncode}")
+    check(f"管道安装({label})成功", result.returncode == 0, output_of(result) if result.returncode else "exit=0")
     check(f"管道安装({label})后二进制存在且可执行", binary.is_file() and os.access(binary, os.X_OK))
     # Mojibake (PS 5.1 byte-decoding the source) would corrupt these characters.
     check(f"管道安装({label})中文未被误解码(编码自愈生效)", "已安装到" in output, last_line)

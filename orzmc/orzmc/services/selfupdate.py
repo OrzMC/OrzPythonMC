@@ -40,6 +40,7 @@ API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 DOWNLOAD_BASE = f"https://github.com/{REPO}/releases/download"
 USER_AGENT = "orzmc-selfupdate"
 STAGING_NAME = ".orzmc-update.tmp"
+UPDATE_LOG_NAME = ".orzmc-update.log"  # helper output (one terminal DONE/FAILED line)
 _LOCAL_VERSION = "local-build"
 
 # Mach-O (thin, both endiannesses, and universal) + ELF. Windows adds MZ.
@@ -58,26 +59,35 @@ _WAIT_TICKS = 300  # helper gives up after ~60s of waiting for us to exit
 def applier_command(staged: str, binary: str, pid: int) -> list[str]:
     """Command for the detached helper: wait for ``pid`` to exit, then swap.
 
-    POSIX uses ``/bin/sh`` (always present); Windows uses ``powershell``
-    (5.1+, present on every supported release). The rename target is the file
-    the helper was given — no Python runs after the swap, so the running
-    process never reads from a changed archive.
+    POSIX uses ``/bin/sh`` (always present); Windows uses ``powershell`` (5.1+,
+    present on every supported release). Both wait for the process they are
+    replacing — the file must stay *valid* for its lazy archive reads until it
+    exits, and on Windows it is also still open.
+
+    Windows then retries the swap: ``Move-Item`` is preferred (rename semantics),
+    with a copy+delete fallback, and ``-ErrorAction Stop`` so a failure is
+    catchable at all (a non-terminating error would silently skip the fallback —
+    CI caught exactly that). The helper prints one terminal ``DONE``/``FAILED``
+    line, which is logged next to the binary for diagnosis.
     """
     if os.name == "nt":
-        move = (
-            f"try {{ Move-Item -Force -LiteralPath '{_ps_quote(staged)}' "
-            f"-Destination '{_ps_quote(binary)}' }} "
-            f"catch {{ [System.IO.File]::Copy('{_ps_quote(staged)}', '{_ps_quote(binary)}', $true); "
-            f"Remove-Item -LiteralPath '{_ps_quote(staged)}' -Force }}"
+        src, dst = _ps_quote(staged), _ps_quote(binary)
+        body = (
+            f"$s='{src}'; $t='{dst}'; $i=0; "
+            f"while ((Get-Process -Id {pid} -ErrorAction SilentlyContinue) -and ($i -lt {_WAIT_TICKS})) "
+            f"{{ Start-Sleep -Milliseconds 200; $i++ }}; "
+            f"while ($i -lt {_WAIT_TICKS + 150}) {{ "
+            f"try {{ Move-Item -Force -LiteralPath $s -Destination $t -ErrorAction Stop; "
+            f"if (-not (Test-Path -LiteralPath $s)) {{ Write-Output 'DONE'; exit 0 }} }} "
+            f"catch {{ try {{ [IO.File]::Copy($s, $t, $true); "
+            f"Remove-Item -LiteralPath $s -Force -ErrorAction Stop; Write-Output 'DONE'; exit 0 }} "
+            f"catch {{ Write-Output ('retry: ' + $_.Exception.Message) }} }}; "
+            f"Start-Sleep -Milliseconds 200; $i++ }}; Write-Output 'FAILED'; exit 1"
         )
-        script = (
-            f"$i=0; while ((Get-Process -Id {pid} -ErrorAction SilentlyContinue) -and ($i -lt {_WAIT_TICKS})) "
-            f"{{ Start-Sleep -Milliseconds 200; $i++ }}; {move}"
-        )
-        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", body]
     script = (
-        f'i=0; while kill -0 "$1" 2>/dev/null && [ "$i" -lt {_WAIT_TICKS} ]; '
-        f'do sleep 0.2; i=$((i+1)); done; mv -f "$2" "$3"'
+        f'i=0; while kill -0 "$1" 2>/dev/null && [ "$i" -lt {_WAIT_TICKS} ]; do sleep 0.2; i=$((i+1)); done; '
+        f'if mv -f "$2" "$3"; then echo DONE; else echo FAILED; exit 1; fi'
     )
     return ["/bin/sh", "-c", script, "orzmc-update", str(pid), staged, binary]
 
@@ -361,11 +371,12 @@ class SelfUpdater:
         still executing from.
         """
         command = applier_command(staged, self._binary, os.getpid())
+        log = os.path.join(os.path.dirname(self._binary), UPDATE_LOG_NAME)
         try:
-            self._process.run_detached(command, cwd=os.path.dirname(self._binary))
+            self._process.run_detached(command, cwd=os.path.dirname(self._binary), log_path=log)
         except OSError as exc:
             raise RuntimeError(f"无法启动升级助手,已保留旧版本: {exc}") from exc
-        self._reporter.info("升级助手已就绪,将在本命令退出后完成替换")
+        self._reporter.info(f"升级助手已就绪,将在本命令退出后完成替换(日志: {log})")
 
     def _record(self, check: UpdateCheck, file: str | None) -> None:
         """Update the install record so the next run reports the new version."""

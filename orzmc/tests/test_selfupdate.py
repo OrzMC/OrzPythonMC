@@ -158,6 +158,7 @@ class TestApplierCommand:
         script = cmd[2]
         assert 'kill -0 "$1"' in script  # waits for our pid
         assert 'mv -f "$2" "$3"' in script  # then the atomic same-dir rename
+        assert "DONE" in script and "FAILED" in script  # terminal marker for the log
 
     def test_windows_helper_uses_powershell_and_waits(self, monkeypatch) -> None:
         monkeypatch.setattr(os, "name", "nt")
@@ -166,6 +167,12 @@ class TestApplierCommand:
         script = cmd[-1]
         assert "Get-Process -Id 4242" in script  # waits for our pid
         assert "Move-Item -Force" in script
+        # -ErrorAction Stop is essential: without it a failed move is a
+        # non-terminating error, the copy fallback never runs, and the helper
+        # silently leaves the staged file behind (CI caught exactly that).
+        assert "Move-Item -Force -LiteralPath $s -Destination $t -ErrorAction Stop" in script
+        assert "[IO.File]::Copy($s, $t, $true)" in script
+        assert "'DONE'" in script and "'FAILED'" in script
         assert r"'C:\bin\.orzmc-update.tmp'" in script
 
     def test_windows_helper_escapes_single_quotes(self, monkeypatch) -> None:
