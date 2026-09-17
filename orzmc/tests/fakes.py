@@ -8,9 +8,9 @@ them directly. The tests directory is on ``sys.path`` under pytest's default
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
-from typing import Any, NoReturn
+from typing import Any, Literal
 
 from orzmc.infra.http import HttpClient
 from orzmc.infra.log import Reporter
@@ -64,6 +64,38 @@ class FakeSink(ProgressSink):
         self.finishes += 1
 
 
+class FakeResponse:
+    """Minimal response object: ``with`` / ``raise_for_status`` / ``iter_content`` / headers."""
+
+    def __init__(self, status: int, body: bytes, headers: dict[str, str]) -> None:
+        self.status_code = status
+        self.headers = headers
+        self._body = body
+
+    def __enter__(self) -> FakeResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> Literal[False]:
+        return False
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise AssertionError(f"HTTP {self.status_code}")
+
+    def iter_content(self, chunk_size: int = 8192) -> Iterator[bytes]:
+        for start in range(0, len(self._body), chunk_size):
+            yield self._body[start : start + chunk_size]
+
+
+def parse_range(value: str, size: int) -> tuple[int, int]:
+    """``bytes=a-b`` / ``bytes=a-`` → inclusive ``(a, b)`` clamped to ``size``."""
+    spec = value.removeprefix("bytes=").partition(",")[0].strip()
+    start_text, _, end_text = spec.partition("-")
+    start = int(start_text)
+    end = size - 1 if not end_text else min(int(end_text), size - 1)
+    return start, end
+
+
 class FakeHttp(HttpClient):
     """Rejects any real network access; tests seed responses per URL.
 
@@ -86,14 +118,45 @@ class FakeHttp(HttpClient):
         # 每次 download 的关键字参数(timeout / on_chunk / on_open 是否给了),
         # 用来断言「小文件用短超时」「进度总量取自响应头而非 HEAD」。
         self.download_kwargs: list[dict[str, Any]] = []
+        # Range 请求记录 + 是否假装服务器不支持 Range(测分块回退)。
+        self.range_requests: list[str] = []
+        self.ignore_ranges = False
 
     def head_location(self, url: str) -> str | None:
         """Seeded 302 target for the rate-limit-proof fallback resolver."""
         self.requests.append(("head_location", url))
         return _longest_match(url, self.redirects)
 
-    def get(self, url: str, params=None, headers=None, stream=False, timeout=None) -> NoReturn:
-        raise AssertionError(f"unexpected get: {url}")
+    def get(self, url: str, params=None, headers=None, stream=False, timeout=None) -> Any:
+        """Serve ``canned`` bytes, honoring ``Range`` unless ``ignore_ranges`` is set.
+
+        Returns ``FakeResponse``; the return type is ``Any`` because the real
+        ``HttpClient.get`` returns a ``requests.Response``.
+        """
+        self.requests.append(("get", url))
+        data = self._payload(url)
+        rng = (headers or {}).get("Range")
+        if rng and self.ignore_ranges:
+            rng = None
+        if rng:
+            self.range_requests.append(rng)
+            start, end = parse_range(rng, len(data))
+            body = data[start : end + 1]
+            return FakeResponse(
+                206,
+                body,
+                {"Content-Range": f"bytes {start}-{end}/{len(data)}", "Content-Length": str(len(body))},
+            )
+        length = self.canned_lengths.get(url, len(data))
+        return FakeResponse(200, data, {} if length is None else {"Content-Length": str(length)})
+
+    def _payload(self, url: str) -> bytes:
+        data = _longest_match(url, self.canned)
+        if data is None:
+            if self.canned_archive is None:
+                raise AssertionError(f"unexpected download: {url}")
+            data = self.canned_archive
+        return data
 
     def download(
         self,
@@ -105,11 +168,7 @@ class FakeHttp(HttpClient):
     ) -> int:
         self.requests.append(("download", url))
         self.download_kwargs.append({"on_chunk": on_chunk, "on_open": on_open, "timeout": timeout})
-        data = _longest_match(url, self.canned)
-        if data is None:
-            if self.canned_archive is None:
-                raise AssertionError(f"unexpected download: {url}")
-            data = self.canned_archive
+        data = self._payload(url)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         with open(dest_path, "wb") as f:
             f.write(data)

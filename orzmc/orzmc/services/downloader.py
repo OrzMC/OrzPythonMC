@@ -16,7 +16,7 @@ from orzmc.infra.hashing import sha1_file
 from orzmc.infra.http import SMALL_FILE_READ_TIMEOUT, HttpClient
 from orzmc.infra.log import Reporter
 from orzmc.infra.progress import ProgressSink
-from orzmc.infra.transfer import download_with_progress
+from orzmc.infra.transfer import PARALLEL_PARTS, download_with_progress
 
 _NATIVE_EXTS = (".dylib", ".dll", ".so", ".jnilib")
 
@@ -39,6 +39,9 @@ class Downloader:
         self._sink = sink
         self._paths = paths
         self._workers = workers
+        # 大文件(客户端 jar / 服务端 jar / Forge 安装器)走分块并行;用户把并发设为 1
+        # 即表达「不要并行」,分块也跟着关掉。
+        self._parts = 1 if workers <= 1 else PARALLEL_PARTS
 
     # ── single file ─────────────────────────────────────────────────────────
 
@@ -50,7 +53,7 @@ class Downloader:
         if not force and not self._needs_download(dest, sha1):
             self._reporter.debug(f"已存在,跳过: {desc}")
             return False
-        download_with_progress(self._http, url, dest, self._sink, desc)
+        download_with_progress(self._http, url, dest, self._sink, desc, parts=self._parts)
         if sha1 and sha1_file(dest) != sha1:
             self._fs.remove(dest)
             raise RuntimeError(f"文件校验失败: {desc}")
