@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any, cast
 
+import typer
 from typer.testing import CliRunner
 
 from orzmc import DEFAULT_DOWNLOAD_THREADS, MAX_DOWNLOAD_THREADS, FileStore, UpdateCheck
@@ -309,8 +311,12 @@ class TestDownloadThreadsOption:
             assert "下载并发数必须在" in result.stdout
 
     def test_help_documents_the_flag(self) -> None:
-        result = runner.invoke(app, ["client", "--help"])
-        assert "--download-threads" in result.stdout
+        # 不断言渲染后的帮助文本:控制台宽度不同,rich 可能把长选项名截断成
+        # "--download-threa…"(CI 上就因此假红过)。断言命令元数据更可靠。
+        # click 不是本项目的直接依赖(typer 内部自带),所以只用 Any 起类型作用。
+        group = cast("Any", typer.main.get_command(app))
+        opts = {opt for param in group.commands["client"].params for opt in param.opts}
+        assert {"--download-threads", "-j"} <= opts
 
 
 def test_self_uninstall_calls_public_api(monkeypatch) -> None:
