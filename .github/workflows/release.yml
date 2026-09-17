@@ -186,14 +186,18 @@ jobs:
         run: uv build --all-packages
       # 按包拆分发布:每个包只用自己 scope 的 API token。
       # 注意 glob:dist/orzmc-* 不会误匹配 orzmc_app-*(下划线)。
+      # 幂等:已在 PyPI 上的版本直接跳过 —— 发布流水线会因为「某个平台二进制失败」
+      # 或「官网重部署失败」被重跑,而 PyPI 不允许覆盖同名版本,不跳过就会整条红。
       - name: Publish orzmc to PyPI
-        run: uv publish dist/orzmc-*
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN_ORZMC_LIB }}
+          PACKAGE: orzmc
+        run: ./scripts/publish_idempotent.sh
       - name: Publish orzmc_app to PyPI
-        run: uv publish dist/orzmc_app-*
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN_ORZMC_APP }}
+          PACKAGE: orzmc_app
+        run: ./scripts/publish_idempotent.sh
 
   # 收尾:二进制 + PyPI 全部落地后才让 Release 可见。
   # 半成品(有二进制、没 PyPI 包)不会出现在 releases/latest 上,官网与一键安装
@@ -204,6 +208,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      actions: write # job 级 permissions 会覆盖工作流级,漏了它 gh workflow run 报 403
     steps:
       # 同上:gh release / gh workflow run 都需要仓库上下文。
       - uses: actions/checkout@v7

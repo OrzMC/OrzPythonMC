@@ -113,6 +113,13 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     # 只有 `$env:TAG` 是环境变量 —— 跨平台步骤必须内联表达式。
     assert 'gh release upload "$TAG"' not in release
     assert 'gh release upload "${{ inputs.tag || github.ref_name }}"' in release
+    # publish job 用 gh workflow run,而 job 级 permissions 会覆盖工作流级 —— 必须自带
+    # actions: write,否则 403 Resource not accessible by integration。
+    publish_job = release.split("\n  publish:", 1)[1]
+    assert "actions: write" in publish_job
+    # PyPI 不允许覆盖同名版本:重跑发布流水线必须幂等。
+    assert "./scripts/publish_idempotent.sh" in release
+    assert (ROOT / "scripts" / "publish_idempotent.sh").is_file()
 
 
 @needs_checkout
