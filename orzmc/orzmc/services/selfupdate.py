@@ -386,7 +386,7 @@ class SelfUpdater:
         # be mistaken for this one's outcome (the acceptance harness polls it).
         self._fs.remove(log)
         try:
-            self._process.run_detached(command, cwd=os.path.dirname(self._binary), log_path=log)
+            self._process.run_detached(command, cwd=os.path.dirname(self._binary), log_path=log, windows_no_window=True)
         except OSError as exc:
             raise RuntimeError(f"无法启动升级助手,已保留旧版本: {exc}") from exc
         self._reporter.info(f"升级助手已就绪,将在本命令退出后完成替换(日志: {log})")

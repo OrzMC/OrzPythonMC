@@ -322,7 +322,14 @@ class TestUpdateFromLocalFile:
         fs, binary = _install(tmp_path)
 
         class _BrokenProcess(FakeProcess):
-            def run_detached(self, args: list[str], cwd: str | None = None, log_path: str | None = None) -> Any:
+            def run_detached(
+                self,
+                args: list[str],
+                cwd: str | None = None,
+                log_path: str | None = None,
+                *,
+                windows_no_window: bool = False,
+            ) -> Any:
                 raise OSError("no helper today")
 
         with pytest.raises(RuntimeError, match="无法启动升级助手"):

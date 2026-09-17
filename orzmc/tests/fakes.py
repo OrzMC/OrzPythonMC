@@ -135,7 +135,14 @@ class FakeProcess(ProcessRunner):
                 on_line("created " + line)
         return self.code
 
-    def run_detached(self, args: list[str], cwd: str | None = None, log_path: str | None = None) -> Any:
+    def run_detached(
+        self,
+        args: list[str],
+        cwd: str | None = None,
+        log_path: str | None = None,
+        *,
+        windows_no_window: bool = False,
+    ) -> Any:
         self.detached.append(list(args))
         return SimpleNamespace(pid=4242)
 

@@ -71,17 +71,27 @@ class ProcessRunner:
         args: list[str],
         cwd: str | None = None,
         log_path: str | None = None,
+        *,
+        windows_no_window: bool = False,
     ) -> subprocess.Popen:
         """Launch a process in the background and return its handle.
 
         ``stdout``/``stderr`` are redirected to ``log_path`` (appended) when
         given, otherwise discarded. The caller keeps the handle so it can poll
         for early exit instead of trusting that a spawned process survives.
+
+        ``windows_no_window`` picks ``CREATE_NO_WINDOW`` (hidden console) over
+        ``DETACHED_PROCESS`` (no console at all). Console *hosts* such as
+        ``powershell.exe`` never get going with ``DETACHED_PROCESS``: CI saw the
+        helper spawn successfully and then produce no output whatsoever.
         """
         self._reporter.debug("$ (detached) " + " ".join(args))
         flags = 0
         if os.name == "nt":
-            flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            if windows_no_window:
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            else:
+                flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         if log_path:
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             # Popen dup()s the handle into the child, so the parent's copy can be
