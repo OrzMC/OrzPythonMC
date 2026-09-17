@@ -23,6 +23,9 @@ class RuntimeOptions:
     extract_music: bool = False
     force_upgrade: bool = False
     force_download: bool = False
+    # ``refresh`` bypasses the metadata cache (see infra.cache); CLI self-upgrade
+    # is a separate command (``orzmc update``), never a launch/deploy option.
+    refresh: bool = False
     symlink: bool = False
     jvm_opts: str | None = None
     server_args: str | None = None

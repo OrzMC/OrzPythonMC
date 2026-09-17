@@ -21,11 +21,13 @@ from orzmc import (
     GameType,
     RuntimeOptions,
     backup_world,
+    check_self_update,
     deploy_server,
     launch_client,
     list_versions,
     remove_version,
     uninstall_self,
+    update_self,
 )
 from orzmc import (
     __version__ as LIB_VERSION,
@@ -33,7 +35,7 @@ from orzmc import (
 from orzmc.infra.log import RichReporter
 from orzmc.infra.progress import RichProgress
 from orzmc_app import __version__ as APP_VERSION
-from orzmc_app.cli.options import JvmOpts, MaxMem, MinMem, RootDir, Username, Verbose, Version, Yes
+from orzmc_app.cli.options import JvmOpts, MaxMem, MinMem, Refresh, RootDir, Username, Verbose, Version, Yes
 from orzmc_app.cli.prompts import confirm_eula, confirm_java, is_interactive, resolve_username, resolve_version
 
 _console = Console(highlight=False)
@@ -85,13 +87,14 @@ def client(
     max_mem: MaxMem = "2G",
     extract_music: Annotated[bool, typer.Option("--extract-music", help="提取客户端音乐后退出")] = False,
     jvm_opts: JvmOpts = None,
+    refresh: Refresh = False,
     root_dir: RootDir = None,
 ) -> None:
     """运行 Minecraft 客户端(缺失文件自动下载即安装)。"""
     game_type_obj = _parse_type(game_type, client=True)
     _check_mem("min", min_mem)
     _check_mem("max", max_mem)
-    resolved = resolve_version(version, root_dir)
+    resolved = resolve_version(version, root_dir, refresh=refresh)
     username = resolve_username(username)
     options = RuntimeOptions(
         is_client=True,
@@ -102,6 +105,7 @@ def client(
         max_mem=max_mem,
         extract_music=extract_music,
         jvm_opts=jvm_opts,
+        refresh=refresh,
         root_dir=root_dir,
     )
     reporter = RichReporter(verbose=bool(ctx.obj.get("verbose")))
@@ -130,13 +134,14 @@ def server(
     nogui: Annotated[
         bool, typer.Option("--nogui", help="无窗口模式启动(不弹服务端 GUI);终端输入 stop 或 Ctrl-C 关闭")
     ] = False,
+    refresh: Refresh = False,
     root_dir: RootDir = None,
 ) -> None:
     """部署并运行 Minecraft 服务端(缺失文件自动下载即安装)。"""
     game_type_obj = _parse_type(game_type, client=False)
     _check_mem("min", min_mem)
     _check_mem("max", max_mem)
-    resolved = resolve_version(version, root_dir)
+    resolved = resolve_version(version, root_dir, refresh=refresh)
     options = RuntimeOptions(
         is_client=False,
         version=resolved,
@@ -150,6 +155,7 @@ def server(
         jvm_opts=jvm_opts,
         server_args=server_args,
         nogui=nogui,
+        refresh=refresh,
         root_dir=root_dir,
     )
     reporter = RichReporter(verbose=bool(ctx.obj.get("verbose")))
@@ -232,6 +238,60 @@ def self_uninstall(
         )
     except Exception as exc:
         _fail(str(exc))
+
+
+@app.command()
+def update(
+    ctx: typer.Context,
+    version: Annotated[
+        str | None, typer.Option("--version", "-v", help="升级到指定版本(如 v2.1.0);缺省用 GitHub 最新发布")
+    ] = None,
+    check: Annotated[bool, typer.Option("--check", help="只检查是否有新版本,不下载")] = False,
+    file: Annotated[str | None, typer.Option("--file", help="用本地二进制升级(需同时 --version;离线/测试接缝)")] = None,
+    yes: Annotated[bool, typer.Option("--yes", help="跳过升级确认")] = False,
+    force: Annotated[bool, typer.Option("--force", help="绕过开发环境护栏(pip / venv 安装仍会被拒绝)")] = False,
+) -> None:
+    """升级工具本身(orzmc 二进制),不是 Minecraft 版本。
+
+    不带参数时查询 GitHub 最新发布并覆盖当前二进制;``-v/--version`` 指定版本
+    (也是 GitHub API 限流时的回退),``--check`` 只检查,``--file`` 用本地文件。
+    卸载请用 ``self-uninstall``,Minecraft 版本管理请用 ``list`` / ``remove``。
+    """
+    binary = str(Path(sys.argv[0]).resolve())
+    reporter = RichReporter(verbose=bool(ctx.obj.get("verbose")))
+    if check:
+        try:
+            current = check_self_update(binary, version=version, reporter=reporter)
+        except Exception as exc:
+            _fail(str(exc))
+        _console.print(f"当前版本: [bold]{current.current}[/bold]")
+        _console.print(f"最新版本: [bold]{current.latest}[/bold]")
+        if current.available:
+            _console.print("[yellow]有新版本可用:orzmc update[/yellow]")
+        else:
+            _console.print("[success]已是最新版本[/success]")
+        return
+    sink = RichProgress()
+    try:
+        applied = update_self(
+            binary,
+            version=version,
+            file=file,
+            yes=yes,
+            force=force,
+            reporter=reporter,
+            sink=sink,
+            # 非交互(脚本/管道)时直接执行 —— 用户已显式调用 update;交互时弹确认。
+            confirm=(
+                (lambda desc: bool(Confirm.ask(f"{desc}\n确定升级吗?", default=True))) if is_interactive() else None
+            ),
+        )
+    except Exception as exc:
+        _fail(str(exc))
+    finally:
+        sink.close()
+    if applied is None:
+        _console.print("[yellow]已取消升级[/yellow]")
 
 
 @app.command()

@@ -45,7 +45,7 @@ class ForgeProvider(ClientProvider):
     game_type = GameType.FORGE
 
     def addon(self, prepare: ClientPrepare) -> ProfileAddon | None:
-        forge = Forge(prepare.http)
+        forge = Forge(prepare.cache)
         full = forge.latest_full_version(prepare.version)
         installer = os.path.join(prepare.paths.client_dir(), "forge", f"forge-{full}-installer.jar")
         prepare.download(forge.installer_url(full), installer, f"下载 Forge 安装器 {full}")

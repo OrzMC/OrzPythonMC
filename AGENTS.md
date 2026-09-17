@@ -19,7 +19,7 @@ OrzMC 是一个跨平台 Minecraft **客户端启动 / 服务端部署** CLI 工
 | 项 | 选择 | 说明 |
 |---|---|---|
 | 包管理 | **uv**(workspace) | 根 pyproject 声明成员;`uv.lock` 提交入库,保证可复现 |
-| 构建 | hatchling | 库版本动态读取自 `orzmc/version.py`(唯一版本源) |
+| 构建 | hatchling | 版本动态读取:库 ← `orzmc/version.py`,应用 ← `orzmc_app/__init__.py`(两 pyproject 均不写死版本) |
 | Python | `>=3.10` | 工具链固定 **3.12**(`uv python pin 3.12`) |
 | CLI | typer | 子命令结构;无参打印帮助 |
 | 交互选择器 | **prompt_toolkit**(应用层) | 全屏键盘导航 TUI;`input=`/`output=` 可注入,测试用 `create_pipe_input`+`DummyOutput`(无真实终端) |
@@ -35,7 +35,9 @@ orzmc/services → orzmc/core → orzmc/domain + orzmc/infra
 - **依赖只允许单向向下**:`domain` 与 `infra` 最底层;`core` 适配外部 API(Mojang 元数据、Fabric/Forge 附加件、服务端核心策略);`services` 编排用例。
 - **客户端/服务端核心策略(对称镜像)**:`core/server/` 定义 `CoreProvider` 抽象 + `ServerPrepare` 注入接口,`vanilla/paper/fabric/forge` 四个 provider 自注册;`core/client/` 定义 `ClientProvider` 抽象 + `ClientPrepare` 注入接口,`vanilla/fabric/forge` 三个 provider 自注册(paper 无客户端,返回 `None`)。`ClientService`/`ServerService` 只按 `GameType` 分发,**改一种类型不影响其它类型实现**。各 provider 的 Forge/Fabric 复杂度收敛在各自文件内;`core` **不 import services 层**——`download`/`resolve_build_java` 等编排 seam 由 services 注入(依赖倒置),Provider 内只依赖 domain + infra。
 - **Forge 用 Maven API**:`core/forge.py` 以 `promotions_slim.json` 解析 `<mc>-<build>` 版本、下载官方安装器;客户端/服务端 provider 共用。客户端启动定义嵌在安装器内 `version.json`,用 `zipfile` 读取(无需运行安装器);服务端用 `--installServer` 安装。不再做 HTML 抓取。
-- **协议解耦**:`orzmc/infra/log.py` 定义 `Reporter`,`orzmc/infra/progress.py` 定义 `ProgressSink`。库内置 rich 默认实现(`RichReporter`/`RichProgress`)。**禁止**库内直接 `print` / `os.system`。
+- **协议解耦**:`orzmc/infra/log.py` 定义 `Reporter`,`orzmc/infra/progress.py` 定义 `ProgressSink`。库内置 rich 默认实现(`RichReporter`/`RichProgress`)。**禁止**库内直接 `print` / `os.system`。`RichProgress` 的 live 判活必须用 `Progress.live.is_started`(`live` 是 Live 实例、恒真,旧 `if not live` 导致 live 永不 start、进度条从不渲染);`finish()` 在任务清空后主动 `stop()` 收掉 live 区,避免后续 plain 日志与残留清行序列互相干扰;字节计数列 `_count_column()` 对 `total is None` 渲染空串,纯文本渲染函数可单测。
+- **元数据缓存与刷新(统一策略)**:`orzmc/infra/cache.py` 的 `MetadataCache` 是唯一缓存层——Mojang 版本清单、version JSON、fabric-meta、Paper Fill API、Forge promotions 全部走它。策略三条:**TTL 24h**(`DEFAULT_TTL`,按文件 mtime + 注入时钟 `now` 判定,`ttl<=0` 表示永不复用);**`refresh=True` 绕过所有缓存读**(CLI `--refresh` → `RuntimeOptions.refresh` → `Services.cache`,`for_version` 也保留);**拉取失败时回退到磁盘上(可能过期的)旧副本**并 warn,只有完全没有缓存才抛错。判定细节:过期条件是 `-_FUTURE_SKEW(300s) <= now-mtime < ttl` —— Windows 上刚写入的文件时间戳可能比 `time.time()` 领先几毫秒(CI 曾因此只在 Windows 上缓存不命中),故容忍小幅未来时间;远超该幅度视为时钟异常、判过期。缓存文件:`cache/version_manifest.json`(沿用原路径)、`cache/versions/<v>.json`(内容寻址 + sha1 校验,refresh 也强制绕过)、`cache/meta/<adapter>/<key>.json`(`meta_path(*parts)` 生成,片段做可移植字符清洗)。名称语义:`update` 专指「升级 CLI 自身」(见下文 `orzmc update`),**不**用于元数据刷新。
+- **下载进度统一**:`orzmc/infra/transfer.py` 的 `download_with_progress(http, url, dest, sink, desc)` 是唯一「带字节进度下载」入口(`Downloader.download_file`、`JavaEnv`、`Mojang.version_json` 共用);元数据 JSON 请求用 `ProgressSink.status(desc)`(默认 = `start(desc, None)`,不定长进度条),慢网不再静默等待。
 - **路径纯函数**:`PathLayout`(domain)只拼路径、**不建目录**;建目录统一在 service 内 `fs.ensure_dir`。
 - **Java 沙盒**:运行时安装在 `<root>/java/<major>/`,用 `bin/java` 启动;版本要求读自版本 JSON `javaVersion.majorVersion`(缺失默认 8)。JRE 即可满足所有类型运行,无需完整 JDK。
 - **服务端启动与关闭**:`server` 有独立 `--nogui` 选项(无窗口;老用法 `--server-args nogui` 仍兼容,`_build_server_command` 判定重不重复注入)。启动后子进程继承父进程 stdin,终端输入 `stop` 即保存退出;Ctrl-C 由 `ProcessRunner.run_stream` 优雅回收——子进程同在前台进程组也收到 SIGINT,父进程捕获 `KeyboardInterrupt` 后等待其保存退出(关闭日志经 `on_line` 透传),超 60s 未退先 SIGTERM 再 SIGKILL,最后 re-raise 让 CLI 报"已取消"返回 130,不遗留孤儿进程。
@@ -46,7 +48,10 @@ orzmc/services → orzmc/core → orzmc/domain + orzmc/infra
 ```
 python/                         # uv workspace 根
   pyproject.toml  uv.lock  AGENTS.md  README.md
-  .github/workflows/{ci,acceptance,release,pages}.yml  scripts/{build,acceptance}.py
+  .github/workflows/{ci,acceptance,release,release-please,pages}.yml
+  .github/{dependabot.yml,PULL_REQUEST_TEMPLATE.md}  release-please-config.json
+  .release-please-manifest.json  CHANGELOG.md(机器人维护)  CONTRIBUTING.md
+  scripts/{build,acceptance,accept_selfupdate}.py
   docs/index.html                # 官网(静态单页,GitHub Pages 托管)
   docs/install.sh  install.ps1   # 一键安装器(Unix sh / Windows PowerShell)
   docs/installer-design.md       # 安装器方案设计(历史评审稿,参考)
@@ -104,7 +109,20 @@ python/                         # uv workspace 根
 - **PATH 还原**:Unix 从 `path_file` 删精确 `path_line` 行;Windows 从 User PATH(winreg,stdlib,guard import)移除记录 token 并广播 `WM_SETTINGCHANGE`,失败只 warn。
 - **PyInstaller onefile 自删除限制**:删除正在运行的 onefile 可执行文件后,任何后续 PYZ 懒加载 import 都会 `SystemExit`——**二进制删除必须是最后一个操作**(所有 reporter 输出之后)。Windows 锁定时 `rename` + `MoveFileExW(MOVEFILE_DELAY_UNTIL_REBOOT)` 兜底并提示重启后删除。
 
-**CI `installer` job(ci.yml)**:push-only(发版 tag 与 PR 不跑,同 `binary`),6 平台矩阵,`needs: quality`。**鸡生蛋**:最新已发布二进制尚不含 `self-uninstall`,e2e 必须本地构建 + `--file` 接缝,不能拉 release。Unix(`shell: bash`):`XDG_STATE_HOME=$RUNNER_TEMP/orzmc-state` + `--dir` + `--no-modify-rc`;Windows(`shell: pwsh`):`LOCALAPPDATA=$RUNNER_TEMP\orzmc-state` + `ORZMC_NO_RC=1`,`powershell -File` 跑 PS 5.1。闭环:安装 → `version` → `self-uninstall --yes` → 断言二进制与 manifest 已删。环境隔离保证不碰真实 PATH / rc / 用户目录。
+**`orzmc update`(库 `orzmc/services/selfupdate.py`,公共 API `check_self_update` / `update_self`)**:升级的是**工具自身二进制**。名称语义已固定:`update` = 自升级 CLI,`self-uninstall` = 卸载,`remove`/`list` = Minecraft 版本。流程:护栏 → 解析目标版本 → 下载/校验 → **交接给分离助手在父进程退出后替换二进制** → 重写 `install.conf`。
+- **为何必须延迟替换**:PyInstaller onefile 的 PYZ 归档是**按需**从 `<可执行文件>?<offset>`(引导器写入的 `sys._pyinstaller_pyz`)读取的,运行中替换自身会让下一个尚未 import 的模块读坏归档(真机复现 `zlib.error: incorrect header check`);Windows 还禁止覆盖/删除运行中的 exe。所以 `_handoff` 用 `ProcessRunner.run_detached` 拉起助手,助手是**唯一**执行最终替换的角色。
+  - POSIX:`/bin/sh` 轮询 `kill -0 <pid>`(必须等父进程退出:`mv` 对运行中的二进制**会成功**)后 `mv -f`,末尾 echo `DONE`/`FAILED`。
+  - Windows:`powershell` **不做存活轮询**——系统本身就拒绝替换运行中的 exe,所以「重试到成功」既安全又可靠;按 `Move-Item → [IO.File]::Copy(overwrite) → 改名绕开再搬` 三级兜底(CI 实测 move 会失败、copy/rename-aside 各成功过一次)。`Move-Item` 必须带 `-ErrorAction Stop`,否则失败是 non-terminating error,catch 不触发、兜底永不执行、暂存文件被静默留下(CI 抓到)。
+  - **Windows 必须用 `CREATE_NO_WINDOW` 而非 `DETACHED_PROCESS`**(`run_detached(..., windows_no_window=True)`):`powershell.exe` 这类控制台宿主在完全没有控制台时起不来,表现为 Popen 成功但助手一行代码都没执行(CI 上助手日志全空)。
+  - 助手**自己**把过程写进 `<install_dir>/.orzmc-update.log`(Windows 用 `Add-Content`,POSIX 用 stdout 重定向)——PowerShell 会缓冲重定向的 stdout,靠 stdout 无法判断助手是卡住还是死了;每次交接前先删旧日志(残留 `DONE` 会被误判为本次结果)。
+  - 故 `UpdateCheck.applied=True` 的含义是「已暂存并交接」,**命令退出后才生效**。
+- 暂存固定 `<install_dir>/.orzmc-update.tmp`(与目标同卷 → rename 原子);交前校验 magic(ELF/Mach-O/PE,HTML/JSON 一律拒绝);失败清理暂存、旧版本原样保留。
+- **当前版本以运行中二进制的 `orzmc/version.py` 为准**(`current_version()`);`install.conf` 只是安装记录(可能是 `local-build`,或被「已交接未落地」提前写上)——用内嵌版本判断才能自愈:交接失败时下次仍会重试。
+- 选项/回退:无参走 GitHub API `releases/latest`(未认证 60 次/时/IP;环境里有 `GITHUB_TOKEN` / `GH_TOKEN` 时自动带上 Bearer 头 → 5000 次/时,CI 已注入 `secrets.GITHUB_TOKEN`),失败提示 `--version vX.Y.Z`(指定版本完全不碰 API);`--check` 只查询;`--file <本地二进制>` + `--version`(离线 / CI 接缝);`--yes` 跳过确认;`--force` 仅绕过开发环境护栏(pip/pipx 托管**始终**拒绝,提示 `pip install -U orzmc-app`)。
+- **两个 PowerShell 都要验收**:安装器声明 5.1+,而 Windows 用户默认拿到的是 5.1(`powershell`,字节级误解码 octet-stream 的 `.ps1`)、现代环境是 7.x(`pwsh`)——两者在编码、iex 作用域、`-UseBasicParsing` 语义上并不一致,故必须分别真机跑,不能只测「5.1 子集写法」。harness 用 `--powershell <exe>` 选择 shell、`--expect-ps-major {5,7}` 断死主版本(否则机器上 `powershell` 被换成 7 会假通过),并打印 `$PSVersionTable` 作为证据。自升级助手固定在 Windows 用 `powershell`(5.1 一定存在,`pwsh` 不保证),与「用哪个 shell 跑安装器」是两件事。
+- 本地/CI 验收:`scripts/accept_selfupdate.py`(跨平台 stdlib,`uv run python scripts/accept_selfupdate.py [--skip-build] [--skip-download] [--skip-oneline] [--keep] [--powershell pwsh --expect-ps-major 7]`)——覆盖 PowerShell 运行时信息、安装器、`--check`、`--file` 延迟替换真的落地(sha256 对比)、真实下载、失败不破坏旧文件、venv 护栏、**管道入口**(`irm \| iex` / `curl \| sh`,用内置 loopback HTTP 服务模拟 GitHub Pages 的 `application/octet-stream`,断言中文未被误解码=编码自愈生效)、卸载闭环,详见 CI `installer` job。
+
+**CI `installer` job(ci.yml)**:push-only(发版 tag 与 PR 不跑,同 `binary`),6 平台矩阵,`needs: quality`。**鸡生蛋**:最新已发布二进制尚不含 `self-uninstall`/`update`,e2e 必须本地构建 + `--file` 接缝,不能拉 release。harness 把 `docs/` 复制到沙箱并按 `pages.yml` **剥掉 install.ps1 的 BOM** 再对外提供(`serve_docs` 必须服务**部署形态**:带 BOM 的源码经 `irm` 求值时首行 U+FEFF 会被当命令,报 "The term 'Windows' is not recognized"——正是 d4e049b 修过的坑;同时断言「仓库保留 BOM(`-File` 需要)」与「部署形态无 BOM」这对不变式,pages.yml 若不再剥 BOM,CI 立刻红)。harness 自己解析参照 tag 走 `https://github.com/<repo>/releases/latest` 的 302(不碰 API、不限流),`--check` 的「显式版本」分支严格断言、「裸 API」分支遇限流只 WARN(库的正式回退就是 `--version`);所有 PowerShell 子进程都加 `[Console]::OutputEncoding=UTF8` 前导并把 `throw` 转成 exit 1,harness 自身 stdout/stderr 也强制 UTF-8(Windows 控制台默认 cp1252,否则第一个中文 `print` 就 UnicodeEncodeError)。`Build binary` 后用**一个跨平台 harness** `scripts/accept_selfupdate.py --skip-build`(Unix 跑一次;Windows **跑两次**——`--powershell powershell --expect-ps-major 5` 与 `--powershell pwsh --expect-ps-major 7`,分别断言 PS 5.1 / 7.x)。步骤:PS 运行时信息 → `install --file` 到临时目录 → `update --check` → `update --file <系统可执行文件> -v v9.9.9`(**轮询 sha256 证明助手真的落地** + 暂存文件消失 + 记录改写)→ `update -v <最新 tag>`(真实下载)→ 不存在版本失败不得破坏旧文件 → venv 路径被护栏拒绝 → **管道入口**(内置 loopback HTTP 服务把 `docs/` 按 GitHub Pages 的 Content-Type 提供;Windows 跑**两种**:`irm` + `[scriptblock]::Create` + `-file/-dir`(不下载资产)与**字面 `irm … \| iex`**(靠 `ORZMC_BIN`/`ORZMC_NO_RC`/`ORZMC_ROOT_DIR` 环境接缝改道,含真实 release 下载);Unix 走 `curl \| sh -s --`;断言退出码、二进制、中文未被误解码、独立安装记录、**未登记 PATH 改动**(看 `install.conf` 里没有 `path_line`/`path_file`,而不是看提示文案))→ `self-uninstall` 删二进制 + 记录且不删游戏数据(Windows 上运行中的镜像删不掉,按文档接受 rename + 重启后删除并校验该提示)。harness 内部把 state 重定向到自己的临时目录(`XDG_STATE_HOME` / `LOCALAPPDATA`,`ORZMC_ROOT_DIR` 把游戏根也关进沙箱)并传 `--no-modify-rc` / `ORZMC_NO_RC=1`,PATH / rc / 用户目录一律不碰。
 
 ## 常用命令
 
@@ -117,9 +135,12 @@ uv run --all-packages pytest        # 全部测试
 uv run mypy                         # 类型检查
 uv run orzmc --help                 # 应用子命令树(无子命令时同样打印帮助)
 uv run orzmc version                # 打印版本(读取库 version.py)
+uv run orzmc update --check         # 检查是否有新版本(只读,--check 不受开发环境护栏限制;真正执行 update 在 venv 内会被拦)
 uv build --all-packages            # 构建 sdist+wheel(库与应用)
 uv publish                         # 发布到 PyPI
 uv run --package orzmc-app python scripts/build.py   # PyInstaller 单文件二进制 → dist/
+uv run python scripts/accept_selfupdate.py           # 安装器 + 自升级本地验收(跨平台,--skip-build 复用 dist/)
+uv run python scripts/accept_selfupdate.py --skip-build --powershell pwsh --expect-ps-major 7   # Windows:再验一遍 PS 7
 uv lock                            # 锁定依赖
 ```
 
@@ -131,6 +152,20 @@ uv lock                            # 锁定依赖
 - **导入规范**:库内按层引用(`from orzmc.domain...`);应用只 `from orzmc import ...` 公共 API。
 - **异常**:网络 / 文件错误在 service 层统一捕获并转 `RuntimeError`(中文消息),不裸抛 requests 异常。
 - **类型注解**:公共 API 全量注解;`from __future__ import annotations` 开头。
+
+## 迭代流程(trunk-based + release-please)
+
+- **只有 `main` 是长期分支**(trunk),永远可发版;干活开短命分支(`feat/*`、`fix/*`、`docs/*`),用 PR 合入,**squash only**。`main` 有分支保护:必需检查 `quality` + `test (ubuntu-latest, x86_64)`,允许 admin 绕过(单人维护不被锁死)。
+- **提交信息必须是 Conventional Commits**(`feat/fix/docs/chore/perf/test/ci/refactor`,可带 scope;破坏性变更 `feat!:` 或正文 `BREAKING CHANGE:`)。这不是风格问题:`release-please` 靠它推导版本号与 `CHANGELOG.md`,写错等于发版出错。
+- **合前重验收的正规入口**(不要为了验收去改 `ci.yml` 的 `on.push.branches` —— 那种临时改动容易误合进 main,历史上真这么干过):
+  ```bash
+  gh workflow run ci.yml --ref <branch> -f full=true   # 追加 6 平台 binary + installer
+  ```
+  `ci.yml` 的 `binary`/`installer` 条件为 `(push 到分支) || inputs.full == true`;PR 默认只跑 `quality` + 6 平台 pytest,保持快速。
+- **版本号不手改**:`orzmc/version.py` 与 `orzmc_app/orzmc_app/__init__.py` 都带 `# x-release-please-version` 标记,由 release-please 的 release PR 一起 bump(两个文件锁步,`test_app_and_library_versions_match` 守着);`release-please-config.json` 用 generic updater 改这两处,`.release-please-manifest.json` 记录上一次发布的版本。因为两个 pyproject 都是 `dynamic`,`uv.lock` **不记录本地包版本**,release PR 不需要动 lock。
+- **版本策略(预稳定期)**:2.x 的破坏性 API 变更**不用** `feat!`/`BREAKING CHANGE:`(release-please 会直接推 major),走 minor + 在 `CHANGELOG.md` 里人工注明;等 API 冻结为 3.0.0 时再启用 `!`。
+- 依赖与 Actions 升级交给 `.github/dependabot.yml`(每周一,分组);`CONTRIBUTING.md` + PR 模板给人和 AI 智能体同一份清单。
+- 夜间验收失败会自动开/追加 issue(`acceptance.yml` 的 `notify` job),不再依赖人盯。
 
 ## 改动流程
 
@@ -147,8 +182,8 @@ uv lock                            # 锁定依赖
 
 **6 平台矩阵**(多处复用同一组 runner 标签):`ubuntu-latest`、`ubuntu-24.04-arm`、`macos-15-intel`、`macos-15`、`windows-latest`、`windows-11-arm`。注意 **`macos-13` 已废弃**,x86_64 macOS 用 `macos-15-intel`;`macos-latest` 已迁到 macOS 26,arm64 显式钉 `macos-15`。arm64 runner 为 public preview。
 
-- **`ci.yml`(push/PR)**:`quality` 单 runner 跑格式/lint/mypy/测试/构建(平台无关);`test` 6 平台全跑 pytest(纯 Python 假件但覆盖 OS 敏感路径,秒级);`binary` 与 `installer` 仅 `push` 分支跑(发版 tag push 与 PR 不跑)——`binary` 6 平台 PyInstaller 构建 + 上传 artifact,`installer` 6 平台安装器 e2e(本地构建 `--file` 接缝 + 隔离环境,装→`version`→`self-uninstall`→断言二进制与 manifest 已删,见上文「一键安装/卸载」)。声明 `workflow_call` + `skip-test-matrix` input,供 release 复用。
-- **`acceptance.yml`(每日 04:23 UTC + workflow_dispatch)**:真实验收 harness `scripts/acceptance.py`(跨平台,stdlib + psutil 进程树管理,替代 `pgrep`/`pkill`;`-m orzmc_app.cli` 调 CLI,不嵌套 `uv run`)。
+- **`ci.yml`(push/PR + `workflow_dispatch`)**:`quality` 单 runner 跑格式/lint/mypy/测试/构建(平台无关);`test` 6 平台全跑 pytest(纯 Python 假件但覆盖 OS 敏感路径,秒级);`binary` 与 `installer` 在 `push` 到分支时跑,或用 `workflow_dispatch -f full=true` 在任意分支按需跑(发版 tag push 与普通 PR 不跑)——`binary` 6 平台 PyInstaller 构建 + 上传 artifact,`installer` 6 平台安装器 e2e(本地构建 `--file` 接缝 + 隔离环境,装→`version`→`self-uninstall`→断言二进制与 manifest 已删,见上文「一键安装/卸载」)。声明 `workflow_call` + `skip-test-matrix` input,供 release 复用。
+- **`acceptance.yml`(每日 04:23 UTC + workflow_dispatch)**:失败时 `notify` job 自动开/追加 issue(`acceptance-logs-primary-*` / `-backcompat-*` 两套 artifact 名故意分开,同平台同名上传会冲突)。真实验收 harness `scripts/acceptance.py`(跨平台,stdlib + psutil 进程树管理,替代 `pgrep`/`pkill`;`-m orzmc_app.cli` 调 CLI,不嵌套 `uv run`)。
   - **版本策略(以最新版为主基准)**:`primary` job 夜间+手动,6 平台跑最新版 × 全部类型(server vanilla/paper/fabric/forge + client vanilla/fabric/forge);`backcompat` job 仅手动 `suite=full`,x86_64 三平台跑旧版本 vanilla 冒烟(`--backcompat`,默认 `1.20.4`)。`latest` 由 Mojang `version_manifest_v2.json` 的 `latest.release` 解析,不额外拉取其它源。
   - **判定语义**:`PASS`(server 日志 `Done (` / client 退出码 0 引导级);`UP(no Done)`(端口开 90s 无 Done = Mojang MC-263542 世界生成卡死,记警告不判失败);`SKIP`(日志含"不支持 Minecraft"/"未找到 Minecraft",类型暂未适配该版本,如 Forge 滞后);`UP(gap)`(上游无该平台产物:Adoptium 对某 OS/arch/major 的 Temurin 返回 404,或 Mojang 无该 arch 的 lwjgl natives —— 记警告不判失败,上游补齐后自动恢复真实判定);`FAIL`/`TIMEOUT` 判失败。客户端引导级判定依赖 Linux `xvfb-run`,headless 需装 xvfb;`--deep-client` 仅真机手动用(CI 的 macOS/Windows 无 GL 上下文会假阴性)。
   - 游戏 root 按 `runner.os`-`runner.arch` 缓存(Java + assets + jars),夜间只取增量。
@@ -157,8 +192,12 @@ uv lock                            # 锁定依赖
 
 ## 发布
 
+- **人按按钮 = 合并 release PR**:`release-please.yml`(push main)让机器人维护 release PR(bump 两处版本 + 写 `CHANGELOG.md` + 更新 manifest);合并它 → 自动打 `vX.Y.Z` tag + 建带 notes 的 GitHub Release → 触发 `release.yml`。紧急时手动 `git tag vX.Y.Z && git push origin vX.Y.Z` 也走同一条流水线。
+- `release.yml` 的 `verify` job 是**发版第一道护栏**:tag 必须等于 `orzmc/version.py` 的版本、且 tag 提交在 `main` 上。不一致会造成客户端自升级死循环(下载→替换→重启后版本没变→再提示升级)与错误的 PyPI 元数据。
+- **原子发布**:`prepare` 先确保 Release 存在(手动 tag 路径下用 `--generate-notes` 建 **draft**;release-please 已建好的原样不动)→ `binary` 用 `gh release upload --clobber` 挂 6 平台产物(不再用 softprops 之类会改写 notes/draft 状态的动作)→ `pypi` 双包发布 → `publish` 最后 `gh release edit --draft=false`。半成品(有二进制、没 PyPI 包)不会出现在 `releases/latest`,官网与一键安装不会提前推新版本。
 - 双通道:**GitHub Release**(各平台 PyInstaller 二进制,见 `release.yml`)+ **PyPI**(`orzmc` 与 `orzmc-app` 双包)。
 - PyPI 用**按包 scope 的 API token**(repo secret:`PYPI_API_TOKEN_ORZMC_LIB`→`orzmc`、`PYPI_API_TOKEN_ORZMC_APP`→`orzmc_app`);`release.yml` 的 `pypi` job 拆两步各自 `uv publish dist/<包>-*`(glob `orzmc-*` 不误匹配 `orzmc_app-*`,下划线分隔)。
-- 版本号唯一源:`orzmc/version.py` 的 `__version__`。发版前提升它,并同步 `orzmc_app/pyproject.toml` 的 `version`。
+- 版本号唯一源:`orzmc/version.py` 的 `__version__`。发版前提升它,并同步 **`orzmc_app/orzmc_app/__init__.py`** 的 `__version__`(应用版本的第二处、也是最后一处副本);两个 pyproject 都是 `dynamic = ["version"]` + `[tool.hatch.version] path`,分别从上面两个文件读取,`pyproject.toml` 里**不再**写死版本号(曾漏改过)。`orzmc_app/tests/test_cli.py::test_app_and_library_versions_match` 断言两者一致,漏改会红。
 - **新包首版坑**:PyPI 禁止非用户身份(如 GitHub Actions 机器人)创建不存在的项目;`orzmc_app` 在 2.0.0 首次发布时不存在,须先由真实账号用 API token 手动上传一次创建项目,机器人之后才能自动发布后续版本。
-- CI 只做质量门禁与发布,**不**负责版本号管理。
+- 可选升级:PyPI **Trusted Publishing**(OIDC)取代长期 token —— 两个包各配 trusted publisher(repo `OrzMC/OrzPythonMC`、workflow `release.yml`、environment `release`),CI 侧加 `permissions: id-token: write` 并把 `UV_PUBLISH_TOKEN` 换成 `uv publish --trusted-publishing always`;`RELEASE_PLEASE_TOKEN`(细粒度 PAT)可选,作用是让机器人开的 release PR 也触发 CI。
+- CI 只做质量门禁与发布,**不**负责版本号管理(交给 release-please 的 release PR)。

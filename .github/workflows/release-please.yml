@@ -1,0 +1,30 @@
+name: Release Please
+
+# 人只管写 Conventional Commits;机器人维护一个 release PR(自动 bump 版本 +
+# 生成 CHANGELOG.md)。合并该 PR = 按下发版按钮 → 自动打 tag + 建带 notes 的
+# GitHub Release → 触发 release.yml 构建 6 平台二进制并发布 PyPI。
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # RELEASE_PLEASE_TOKEN 是可选的可选优化:用 PAT 建的 release PR 才会触发
+      # CI(GITHUB_TOKEN 建的 PR 按设计不触发工作流)。没有它也能用,只是 release
+      # PR 上没有检查——发版提交只含版本号与 CHANGELOG,风险低。
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}

@@ -102,6 +102,9 @@ OrzMC 一键安装器(Windows / PowerShell 5.1+)
 
 卸载(内置,推荐):
   orzmc self-uninstall [--yes] [--remove-root] [--force]
+
+升级(内置,也可重跑本命令覆盖安装):
+  orzmc update [--check] [-v vX.Y.Z]
 '@
 }
 
@@ -268,7 +271,7 @@ function Do-Install {
         Write-Host "未修改用户 PATH;若当前 PATH 不含 $($script:InstallDir),请手动添加:"
         Write-Host "  在「系统属性 → 环境变量」的用户 Path 中追加 $($script:InstallDir)"
     }
-    Write-Host '升级:重新执行本命令即可覆盖安装。'
+    Write-Host '升级:orzmc update(或重新执行本命令覆盖安装)。'
     Write-Host '卸载: orzmc self-uninstall --yes(游戏数据默认保留;--remove-root 连 ~\minecraft 一起删)'
 }
 

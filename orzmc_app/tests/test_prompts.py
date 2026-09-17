@@ -29,7 +29,7 @@ class TestResolveVersion:
         """
         import orzmc as orzmc_module
 
-        monkeypatch.setattr(orzmc_module, "remote_version_catalog", lambda root_dir=None: CATALOG)
+        monkeypatch.setattr(orzmc_module, "remote_version_catalog", lambda root_dir=None, refresh=False: CATALOG)
         monkeypatch.setattr(picker_module, "run_picker", lambda catalog: "1.21.4")
         monkeypatch.setattr(prompts_module, "is_interactive", lambda: True)
         assert resolve_version(None, None) == "1.21.4"
@@ -43,20 +43,33 @@ class TestResolveVersion:
 
     def test_tty_calls_picker(self, monkeypatch) -> None:
         monkeypatch.setattr(prompts_module, "is_interactive", lambda: True)
-        monkeypatch.setattr(prompts_module, "remote_version_catalog", lambda root_dir=None: CATALOG)
+        monkeypatch.setattr(prompts_module, "remote_version_catalog", lambda root_dir=None, refresh=False: CATALOG)
         monkeypatch.setattr(prompts_module, "run_picker", lambda catalog: "1.21.4")
         assert resolve_version(None, None) == "1.21.4"
+
+    def test_refresh_forwarded_to_catalog(self, monkeypatch) -> None:
+        seen: list[bool] = []
+
+        def catalog(root_dir=None, refresh=False):
+            seen.append(refresh)
+            return CATALOG
+
+        monkeypatch.setattr(prompts_module, "is_interactive", lambda: True)
+        monkeypatch.setattr(prompts_module, "remote_version_catalog", catalog)
+        monkeypatch.setattr(prompts_module, "run_picker", lambda catalog: None)
+        assert resolve_version(None, None, refresh=True) is None
+        assert seen == [True]
 
     def test_picker_none_falls_back_to_latest(self, monkeypatch) -> None:
         # Escape in the picker returns None → caller falls back to latest release.
         monkeypatch.setattr(prompts_module, "is_interactive", lambda: True)
-        monkeypatch.setattr(prompts_module, "remote_version_catalog", lambda root_dir=None: CATALOG)
+        monkeypatch.setattr(prompts_module, "remote_version_catalog", lambda root_dir=None, refresh=False: CATALOG)
         monkeypatch.setattr(prompts_module, "run_picker", lambda catalog: None)
         assert resolve_version(None, None) is None
 
     def test_picker_exception_falls_back(self, monkeypatch) -> None:
         monkeypatch.setattr(prompts_module, "is_interactive", lambda: True)
-        monkeypatch.setattr(prompts_module, "remote_version_catalog", lambda root_dir=None: CATALOG)
+        monkeypatch.setattr(prompts_module, "remote_version_catalog", lambda root_dir=None, refresh=False: CATALOG)
 
         def boom(catalog):
             raise RuntimeError("选择器故障")
@@ -67,7 +80,7 @@ class TestResolveVersion:
     def test_network_failure_falls_back(self, monkeypatch) -> None:
         monkeypatch.setattr(prompts_module, "is_interactive", lambda: True)
 
-        def boom(root_dir=None):
+        def boom(root_dir=None, refresh=False):
             raise RuntimeError("网络错误")
 
         monkeypatch.setattr(prompts_module, "remote_version_catalog", boom)
@@ -75,7 +88,7 @@ class TestResolveVersion:
 
     def test_empty_catalog_falls_back(self, monkeypatch) -> None:
         monkeypatch.setattr(prompts_module, "is_interactive", lambda: True)
-        monkeypatch.setattr(prompts_module, "remote_version_catalog", lambda root_dir=None: [])
+        monkeypatch.setattr(prompts_module, "remote_version_catalog", lambda root_dir=None, refresh=False: [])
         assert resolve_version(None, None) is None
 
 

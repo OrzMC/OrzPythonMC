@@ -31,13 +31,27 @@ Windows(PowerShell 5.1+):
 irm https://orzmc.github.io/OrzPythonMC/install.ps1 | iex
 ```
 
-安装器自动识别平台、下载最新二进制、登记 PATH 并写入安装记录;重复执行即覆盖升级。更多选项见 `install.sh --help`(`--version vX.Y.Z` 固定版本、`--dir` 自定义目录等)。
+安装器自动识别平台、下载最新二进制、登记 PATH 并写入安装记录;重复执行即覆盖升级。更多选项见 `install.sh --help`(`--version vX.Y.Z` 固定版本、`--dir` 自定义目录等)。已装好后也可用内置的 `orzmc update` 自升级(见下文)。
 
 **方式二:其它方式**
 
 - **PyPI**(需 Python 3.10+):`pip install orzmc-app`
 - **独立二进制**:从 [Releases](https://github.com/OrzMC/OrzPythonMC/releases) 下载对应平台的二进制(`orzmc-macos-*` / `orzmc-linux-*` / `orzmc-windows-*`),解压后直接运行。官网页面会自动识别你的平台,给出对应下载链接。
 - **uv 用户**:`uv tool install orzmc-app`(卸载用 `uv tool uninstall orzmc-app`)
+
+## 升级
+
+```bash
+orzmc update             # 升级到 GitHub 最新发布
+orzmc update --check     # 只检查是否有新版本
+orzmc update -v v2.1.0   # 指定版本(也是 GitHub API 限流时的回退)
+orzmc update --file ./orzmc -v v2.1.0   # 离线用本地二进制升级
+```
+
+- 为保证正在运行的程序不被弄坏,二进制替换由**分离助手在命令退出后**完成——提示「本命令退出后生效」,**下一次运行才是新版本**。
+- 无参数查询走 GitHub Releases API 的未认证额度(60 次/时/IP);设有 `GITHUB_TOKEN` / `GH_TOKEN` 时自动带上(5000 次/时),限流或离线时用 `-v vX.Y.Z` 指定版本即可完全绕过 API。
+- pip / pipx 安装会被拒绝并提示用 `pip install -U orzmc-app` / `pipx upgrade orzmc-app`。
+- 直接重跑一键安装器同样会覆盖升级,效果相同。
 
 ## 卸载
 
@@ -79,6 +93,10 @@ orzmc server -v 26.2 -t fabric --yes
 # 管理已安装版本
 orzmc list
 orzmc remove -v 26.2 --yes
+
+# 升级 orzmc 自身(GitHub 最新发布;--check 只查询,--version 指定版本)
+orzmc update --check
+orzmc update
 ```
 
 ## 命令行
@@ -88,11 +106,12 @@ orzmc remove -v 26.2 --yes
 ```
 orzmc [--verbose]                 # 无子命令 → 打印帮助
 orzmc client   [-v VER] [--username|-u USER] [-t vanilla|fabric|forge] [-m MIN] [-x MAX]
-               [--extract-music] [--jvm-opts ...]
+               [--extract-music] [--jvm-opts ...] [--refresh]
 orzmc server   [-v VER] [-t vanilla|paper|fabric|forge] [-m MIN] [-x MAX]
                [--force-upgrade] [--symlink] [--force-download] [--yes]
-               [--jvm-opts ...] [--server-args ...] [--nogui]
+               [--jvm-opts ...] [--server-args ...] [--nogui] [--refresh]
 orzmc remove   -v VER [--server -t TYPE] [--yes]
+orzmc update   [-v VER] [--check] [--file PATH] [--yes] [--force]
 orzmc self-uninstall [--yes] [--remove-root] [--force]
 orzmc list
 orzmc backup   [-v VER] [-t TYPE]
@@ -103,7 +122,9 @@ orzmc version
 
 - **版本缺省**:有 TTY 时弹出键盘导航选择器(`↑↓` 选择、`←→` / PgUp / PgDn 翻页、输入即过滤、`t` 切正式 / 测试版、`x` 清空、Enter 选中、Esc 用最新);脚本 / 管道等非 TTY 场景自动用最新 release 与默认值,不阻塞。
 - **玩家名**:`client` 默认 `guest`;TTY 下未指定 `-u/--username` 会交互询问(回车用默认);脚本 / 管道等非 TTY 场景静默用默认。
-- **运行即安装**:`client` / `server` 检测到文件缺失会自动下载补齐。
+- **运行即安装**:`client` / `server` 检测到文件缺失会自动下载补齐,并显示下载进度(元数据请求也有进度条,慢网不会静默等待)。
+- **元数据缓存**:版本清单、Fabric 元数据、Paper 构建、Forge promotions 统一缓存 **24 小时**,期间直接复用缓存(离线也能启动已装版本);加 `--refresh` 强制重新拉取。
+- **自升级**:`orzmc update` 升级工具自身二进制(`--check` 只查询,`-v/--version` 指定版本或绕过 GitHub API 限流,`--file` 离线/本地安装)。为保证正在运行的程序不被弄坏,替换由分离助手在命令退出后完成——**下一次运行才是新版本**;pip/pipx 托管安装会被拒绝并提示用 `pip install -U orzmc-app`。
 - **服务端关闭**:终端输入 `stop` 保存退出,或按 **Ctrl-C**(等待保存退出,超 60s 才强制结束,不留孤儿进程)。
 - **类型**:客户端 `vanilla|fabric|forge`;服务端 `vanilla|paper|fabric|forge`。
 - **Java**:版本要求读自版本 JSON,自动下载 Temurin JRE 到 `java/<大版本>/`,无需完整 JDK。
@@ -133,15 +154,26 @@ uv build --all-packages       # 构建两个包
 
 ## 自动化验收与 CI
 
-跨平台由三个 GitHub Actions 工作流保证(**6 平台** = macOS / Linux / Windows × x86_64 / arm64):
+跨平台由四个 GitHub Actions 工作流保证(**6 平台** = macOS / Linux / Windows × x86_64 / arm64):
 
-- **`ci.yml`**(push / PR):质量门禁 + 6 平台 pytest + 合并后 6 平台二进制构建
-- **`acceptance.yml`**(每日 + 手动):真实下载 Minecraft / Java 并启动,以最新版为主基准,`backcompat` 冒烟旧版本
-- **`release.yml`**(打 `v*` 标签):6 平台二进制挂 Release + `orzmc` / `orzmc-app` 双包发布 PyPI
+- **`ci.yml`**(push / PR):质量门禁 + 6 平台 pytest + 合并后 6 平台二进制构建与安装器 e2e。
+  想在**合并前**跑重活(二进制 + 安装器),用正规入口,不必改工作流:
+  `gh workflow run ci.yml --ref <分支> -f full=true`
+- **`acceptance.yml`**(每日 + 手动):真实下载 Minecraft / Java 并启动,以最新版为主基准,`backcompat` 冒烟旧版本;失败会自动开 issue
+- **`release-please.yml`**(push main):按 Conventional Commits 自动开 release PR(版本号 + `CHANGELOG.md`),合并即发版
+- **`release.yml`**(打 `v*` 标签):先校验 tag 与代码版本一致,再 6 平台二进制挂 Release、`orzmc` / `orzmc-app` 双包发布 PyPI,最后才让 Release 可见
+
+发版与协作细则见 [`CONTRIBUTING.md`](CONTRIBUTING.md),架构红线见 [`AGENTS.md`](AGENTS.md)。
 
 本地跑真实验收:
 
 ```bash
+# 安装器 + 自升级闭环(隔离临时目录,不碰 PATH / rc / ~/minecraft)
+# Windows 需两个 PowerShell 各跑一遍(5.1 是默认 shell,7.x 行为并不相同)
+uv run python scripts/accept_selfupdate.py
+uv run python scripts/accept_selfupdate.py --skip-build --powershell pwsh --expect-ps-major 7
+
+# 真实下载 Minecraft / Java 并启动
 uv run --package orzmc-app python scripts/acceptance.py \
     --case server:vanilla:latest --case client:vanilla:latest \
     --root /tmp/orzmc-accept

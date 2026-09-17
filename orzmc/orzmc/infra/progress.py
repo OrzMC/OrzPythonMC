@@ -8,6 +8,10 @@ closes it. Callers never touch the rendering details.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from rich.console import Console
 
 
 class ProgressSink(ABC):
@@ -22,6 +26,16 @@ class ProgressSink(ABC):
     @abstractmethod
     def finish(self) -> None: ...
 
+    def status(self, desc: str) -> None:
+        """Show indeterminate progress for work with no byte/total count.
+
+        Used around metadata requests (manifest, fabric-meta, Paper, Forge) so
+        a slow network is never a silent wait. Defaults to a total-less
+        ``start``; the caller ends it with ``finish()``. Sinks that can only
+        render known totals may override this as a no-op.
+        """
+        self.start(desc, None)
+
 
 class NullProgress(ProgressSink):
     """No-op implementation used in tests and when progress is unwanted."""
@@ -33,26 +47,52 @@ class NullProgress(ProgressSink):
     def finish(self) -> None: ...
 
 
-class RichProgress(ProgressSink):
-    """Renders one rich progress task; reused across a whole operation."""
+def _count_column() -> Any:
+    """Rich column showing the completed count, blank while the total is unknown.
 
-    def __init__(self) -> None:
-        from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeElapsedColumn
+    Indeterminate tasks (metadata status lines, downloads without
+    ``Content-Length``) have ``total is None`` — printing a hard ``0`` there
+    reads as "stuck", while the pulsing bar + spinner already say "working".
+    Defined lazily so importing this module never pulls rich.
+    """
+    from rich.progress import ProgressColumn
+    from rich.text import Text
+
+    class CountColumn(ProgressColumn):
+        def render(self, task: Any) -> Any:
+            return Text("") if task.total is None else Text(str(int(task.completed)))
+
+    return CountColumn()
+
+
+class RichProgress(ProgressSink):
+    """Renders one rich progress task; reused across a whole operation.
+
+    ``console`` (optional) is the test seam: passing a ``Console`` with
+    ``force_terminal=True`` makes rendering observable without a real TTY.
+    """
+
+    def __init__(self, console: Console | None = None) -> None:
+        from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn
 
         self._progress = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
-            TextColumn("{task.completed}"),
+            _count_column(),
             TimeElapsedColumn(),
+            SpinnerColumn(),
+            console=console,
         )
         self._task_id: TaskID | None = None
 
     @property
     def is_live(self) -> bool:
-        return bool(self._progress.live)
+        # ``Progress.live`` is a Live *instance* (always truthy); only
+        # ``Live.is_started`` tells whether the display is actually running.
+        return self._progress.live.is_started
 
     def _ensure_live(self) -> None:
-        if not self._progress.live:
+        if not self._progress.live.is_started:
             self._progress.start()
 
     def start(self, desc: str, total: int | None = None) -> None:
@@ -67,13 +107,16 @@ class RichProgress(ProgressSink):
             self._progress.advance(self._task_id, n)
 
     def finish(self) -> None:
-        if self._task_id is not None:
-            self._progress.stop_task(self._task_id)
-            self._progress.remove_task(self._task_id)
-            self._task_id = None
+        if self._task_id is None:
+            return
+        self._progress.stop_task(self._task_id)
+        self._progress.remove_task(self._task_id)
+        self._task_id = None
+        # No task left → take the live region down. Otherwise it keeps
+        # refreshing an empty renderable and every later plain line (server
+        # console output, prompts) interleaves with stray clear-line escapes.
+        if self._progress.live.is_started:
+            self._progress.stop()
 
     def close(self) -> None:
-        if self._task_id is not None:
-            self.finish()
-        if self._progress.live:
-            self._progress.stop()
+        self.finish()

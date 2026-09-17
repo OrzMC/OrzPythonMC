@@ -18,6 +18,7 @@ from orzmc.infra.fs import FileStore
 from orzmc.infra.http import HttpClient
 from orzmc.infra.log import Reporter
 from orzmc.infra.progress import ProgressSink
+from orzmc.infra.transfer import download_with_progress
 
 ADOPTIUM_BINARY = "https://api.adoptium.net/v3/binary/latest/{major}/ga/{os}/{arch}/{image}/hotspot/normal/eclipse"
 
@@ -73,10 +74,7 @@ class JavaEnv:
         ext = ".zip" if os_name == "windows" else ".tar.gz"
         archive = os.path.join(tmp_dir, f"temurin-{major}-{image}-{os_name}-{arch}{ext}")
 
-        total = self._http.content_length(url)
-        self._sink.start(desc, total)
-        self._http.download(url, archive, on_chunk=lambda n: self._sink.advance(n))
-        self._sink.finish()
+        download_with_progress(self._http, url, archive, self._sink, desc)
 
         dest_dir = self._paths.java_major_dir(major)
         self._fs.ensure_dir(dest_dir)

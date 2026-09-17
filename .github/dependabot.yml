@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Actions 版本(历史上靠人肉升级过一次 node24 运行时)。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # uv workspace 的依赖(pyproject + uv.lock),两个包一起。
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 3
+    groups:
+      python-deps:
+        patterns: ["*"]

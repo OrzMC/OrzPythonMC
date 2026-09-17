@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 from orzmc.domain.paths import PathLayout
 from orzmc.domain.types import GameType
+from orzmc.infra.cache import MetadataCache
 from orzmc.infra.fs import FileStore
 from orzmc.infra.http import HttpClient
 from orzmc.infra.log import Reporter
@@ -50,6 +51,7 @@ class ServerPrepare:
     fs: FileStore
     reporter: Reporter
     http: HttpClient
+    cache: MetadataCache
     process: ProcessRunner
     # ── orchestration injections (services layer) ───────────────────────────
     download: DownloadSeam

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "orzmc-app"
-version = "2.0.5"
+dynamic = ["version"]
 description = "OrzMC: CLI application for Minecraft client/server bootstrap"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,9 @@ dependencies = [
 
 [project.scripts]
 orzmc = "orzmc_app.cli:main"
+
+[tool.hatch.version]
+path = "orzmc_app/__init__.py"
 
 [tool.uv.sources]
 orzmc = { workspace = true }

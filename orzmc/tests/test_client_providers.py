@@ -20,6 +20,7 @@ from orzmc.core.client.base import ClientPrepare
 from orzmc.core.forge import PROMOTIONS_URL
 from orzmc.domain.paths import PathLayout
 from orzmc.domain.types import GameType
+from orzmc.infra.cache import MetadataCache
 from orzmc.infra.fs import FileStore
 from orzmc.infra.runner import ProcessRunner
 
@@ -53,6 +54,7 @@ def _client_prepare(
         fs=fs,
         reporter=FakeReporter(),
         http=http,
+        cache=MetadataCache(http, fs, paths.cache_dir()),
         process=process,
         download=fake_download,
         resolve_build_java=lambda major, need_jdk=False, confirm=None: "/fake/java",

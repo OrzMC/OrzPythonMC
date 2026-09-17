@@ -13,7 +13,7 @@ import json
 import zipfile
 from typing import Any
 
-from orzmc.infra.http import HttpClient
+from orzmc.infra.cache import MetadataCache
 
 PROMOTIONS_URL = "https://files.minecraftforge.net/maven/net/minecraftforge/forge/promotions_slim.json"
 MAVEN_BASE = "https://maven.minecraftforge.net/net/minecraftforge/forge"
@@ -22,12 +22,19 @@ MAVEN_BASE = "https://maven.minecraftforge.net/net/minecraftforge/forge"
 class Forge:
     """Resolve the Forge version for a MC version and locate installer artifacts."""
 
-    def __init__(self, http: HttpClient) -> None:
-        self._http = http
+    def __init__(self, cache: MetadataCache) -> None:
+        self._cache = cache
 
     def latest_full_version(self, mc_version: str) -> str:
         """``<mc>-<build>`` (e.g. ``1.20.4-49.2.8``) for ``mc_version``."""
-        promos = self._http.get_json(PROMOTIONS_URL).get("promos") or {}
+        promos = (
+            self._cache.get_json(
+                self._cache.meta_path("forge-promotions"),
+                PROMOTIONS_URL,
+                desc="获取 Forge 版本列表",
+            ).get("promos")
+            or {}
+        )
         for key in (f"{mc_version}-latest", f"{mc_version}-recommended"):
             build = promos.get(key)
             if build:

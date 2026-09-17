@@ -15,6 +15,7 @@ from orzmc.infra.hashing import sha1_file
 from orzmc.infra.http import HttpClient
 from orzmc.infra.log import Reporter
 from orzmc.infra.progress import ProgressSink
+from orzmc.infra.transfer import download_with_progress
 
 _NATIVE_EXTS = (".dylib", ".dll", ".so", ".jnilib")
 
@@ -46,10 +47,7 @@ class Downloader:
         if not force and not self._needs_download(dest, sha1):
             self._reporter.debug(f"已存在,跳过: {desc}")
             return False
-        total = self._http.content_length(url)
-        self._sink.start(desc, total)
-        self._http.download(url, dest, on_chunk=lambda n: self._sink.advance(n))
-        self._sink.finish()
+        download_with_progress(self._http, url, dest, self._sink, desc)
         if sha1 and sha1_file(dest) != sha1:
             self._fs.remove(dest)
             raise RuntimeError(f"文件校验失败: {desc}")

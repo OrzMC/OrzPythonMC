@@ -4,11 +4,25 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 合前重验收的正规入口:不跑本工作流的源分支上,也能随时把「6 平台二进制 +
+  # 安装器 e2e」跑一遍(以前只能临时把分支加进 push.branches,那种改触发条件的
+  # 做法容易误合进 main)。
+  #   gh workflow run ci.yml --ref <branch> -f full=true
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 追加 push-only 的重活(binary + installer 6 平台矩阵)
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       # Release reuses this workflow as its quality gate; the 6-platform test
       # matrix already ran on main, so the tag only needs the single-runner checks.
       skip-test-matrix:
+        type: boolean
+        required: false
+        default: false
+      full:
         type: boolean
         required: false
         default: false
@@ -82,10 +96,11 @@ jobs:
 
   # PyInstaller packaging is OS/arch-specific — verify a build works on all 6
   # platforms after every merge to main (not per-PR: keeps PR CI fast). The
-  # branch check keeps this from running on release tag pushes.
+  # branch check keeps this from running on release tag pushes; `full=true`
+  # (workflow_dispatch / workflow_call) opts in on demand.
   binary:
     needs: quality
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')) || inputs.full == true }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -145,7 +160,7 @@ jobs:
   # local build (the "chicken-and-egg" seam) rather than pulling a release.
   installer:
     needs: quality
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')) || inputs.full == true }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -166,6 +181,11 @@ jobs:
     timeout-minutes: 30
     env:
       UV_PYTHON_PREFERENCE: only-managed
+      # `orzmc update --check` reads the Releases API from the *built binary*;
+      # the unauthenticated limit (60/h/IP) is shared with every other job on
+      # the runner's egress IP, so give it a token (the library honours
+      # GITHUB_TOKEN / GH_TOKEN and still works without one).
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - name: Install uv
@@ -178,32 +198,22 @@ jobs:
       - name: Build binary
         run: uv run --package orzmc-app python scripts/build.py
 
-      # Unix: install to a temp dir with XDG_STATE_HOME redirected and rc
-      # untouched; self-uninstall then deletes the binary + manifest.
-      - name: Installer e2e (Unix)
+      # Installer + self-update e2e: one cross-platform harness covers install
+      # --file into an isolated temp dir → update --check → update --file (the
+      # detached helper really swaps the binary) → real release download →
+      # failure path → dev guard → piped entry (irm | iex / curl | sh, served
+      # with GitHub-Pages-like content types) → self-uninstall. PATH / shell rc
+      # / user dirs are never touched.
+      - name: Installer + self-update e2e (Unix)
         if: runner.os != 'Windows'
-        shell: bash
-        env:
-          XDG_STATE_HOME: "${{ runner.temp }}/orzmc-state"
-        run: |
-          set -euxo pipefail
-          sh docs/install.sh --file "$PWD/dist/orzmc" --dir "$RUNNER_TEMP/orzmc-install" --no-modify-rc
-          "$RUNNER_TEMP/orzmc-install/orzmc" version
-          "$RUNNER_TEMP/orzmc-install/orzmc" self-uninstall --yes
-          test ! -e "$RUNNER_TEMP/orzmc-install/orzmc"
-          test ! -e "$XDG_STATE_HOME/orzmc/install.conf"
-
-      # Windows: LOCALAPPDATA redirected + ORZMC_NO_RC=1 keeps the install
-      # fully hermetic; `powershell -File` runs the installer on PS 5.1.
-      - name: Installer e2e (Windows)
+        run: uv run python scripts/accept_selfupdate.py --skip-build
+      # Windows runs it once per PowerShell flavour: 5.1 is the shell users get
+      # by default and the one that byte-decodes an octet-stream .ps1 source
+      # (the installer's encoding self-heal must recover it); 7.x is the modern
+      # shell. Both are asserted, including their PSEdition/version.
+      - name: Installer + self-update e2e (Windows PowerShell 5.1)
         if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          LOCALAPPDATA: "${{ runner.temp }}\\orzmc-state"
-          ORZMC_NO_RC: "1"
-        run: |
-          powershell -NoProfile -File docs/install.ps1 -file "$PWD\dist\orzmc.exe" -dir "$env:RUNNER_TEMP\orzmc-install"
-          & "$env:RUNNER_TEMP\orzmc-install\orzmc.exe" version
-          & "$env:RUNNER_TEMP\orzmc-install\orzmc.exe" self-uninstall --yes
-          if (Test-Path "$env:RUNNER_TEMP\orzmc-install\orzmc.exe") { throw "self-uninstall left the binary" }
-          if (Test-Path "$env:LOCALAPPDATA\orzmc\install.conf") { throw "self-uninstall left the install manifest" }
+        run: uv run python scripts/accept_selfupdate.py --skip-build --powershell powershell --expect-ps-major 5
+      - name: Installer + self-update e2e (PowerShell 7)
+        if: runner.os == 'Windows'
+        run: uv run python scripts/accept_selfupdate.py --skip-build --powershell pwsh --expect-ps-major 7

@@ -8,6 +8,7 @@ them directly. The tests directory is on ``sys.path`` under pytest's default
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from typing import Any, NoReturn
 
 from orzmc.infra.http import HttpClient
@@ -76,6 +77,7 @@ class FakeHttp(HttpClient):
         self.canned: dict[str, bytes] = {}
         self.json_responses: dict[str, Any] = {}
         self.requests: list[tuple[str, str]] = []
+        self.json_calls: list[str] = []
 
     def content_length(self, url: str) -> int | None:
         return None
@@ -97,7 +99,8 @@ class FakeHttp(HttpClient):
             on_chunk(len(data))
         return len(data)
 
-    def get_json(self, url: str, params: dict[str, str] | None = None):
+    def get_json(self, url: str, params: dict[str, str] | None = None, headers: dict[str, str] | None = None):
+        self.json_calls.append(url)
         value = _longest_match(url, self.json_responses)
         if value is None:
             raise AssertionError(f"unexpected get_json: {url}")
@@ -118,6 +121,7 @@ class FakeProcess(ProcessRunner):
     def __init__(self, code: int = 0, created: list[str] | None = None) -> None:
         self.code = code
         self.calls: list[list[str]] = []
+        self.detached: list[list[str]] = []
         self.created = created or []
 
     def run_stream(self, cmd: list[str], on_line=None, cwd: str | None = None) -> int:
@@ -130,6 +134,17 @@ class FakeProcess(ProcessRunner):
             for line in self.created:
                 on_line("created " + line)
         return self.code
+
+    def run_detached(
+        self,
+        args: list[str],
+        cwd: str | None = None,
+        log_path: str | None = None,
+        *,
+        windows_no_window: bool = False,
+    ) -> Any:
+        self.detached.append(list(args))
+        return SimpleNamespace(pid=4242)
 
     @property
     def last_cmd(self) -> list[str] | None:

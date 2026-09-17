@@ -259,7 +259,7 @@
       <div class="sec-head">
         <div class="kicker">Install · Uninstall</div>
         <h2>安装与卸载</h2>
-        <p>无需 Python / pip。Windows 用 PowerShell,其余平台用 curl;重复执行安装即升级。</p>
+        <p>无需 Python / pip。Windows 用 PowerShell,其余平台用 curl;重复执行安装即升级,装好后也可用内置 <code>orzmc update</code> 自升级。</p>
       </div>
 
       <div class="cmd-panel">
@@ -313,7 +313,14 @@ orzmc client -v 26.2
 orzmc client -v 26.2 -t fabric -u Steve
 
 <span class="cm"># 部署并启动 Paper 服务端(自动接受 EULA,无窗口模式)</span>
-orzmc server -v 26.2 -t paper --yes --nogui</pre></div>
+orzmc server -v 26.2 -t paper --yes --nogui
+
+<span class="cm"># 元数据(版本清单 / Fabric / Paper / Forge)默认缓存 24h;--refresh 强制重新拉取</span>
+orzmc client -v 26.2 --refresh
+
+<span class="cm"># 升级 orzmc 自身(GitHub 最新发布;--check 只查询,-v 指定版本)</span>
+orzmc update --check
+orzmc update</pre></div>
     </div>
   </section>
 
@@ -355,6 +362,16 @@ orzmc server -v 26.2 -t paper --yes --nogui</pre></div>
           <div class="icon">🚀</div>
           <h3>即装即用</h3>
           <p>检测到文件缺失自动下载补齐,无需独立 install 子命令;CLI 与库双层架构,可编程复用。</p>
+        </div>
+        <div class="feat">
+          <div class="icon">💾</div>
+          <h3>元数据缓存与进度反馈</h3>
+          <p>版本清单 / Fabric / Paper / Forge 元数据统一缓存 24 小时,离线也能启动已装版本;下载与元数据请求都有进度条,慢网不静默;需要最新数据时加 <code>--refresh</code>。</p>
+        </div>
+        <div class="feat">
+          <div class="icon">⬆️</div>
+          <h3>命令行自升级</h3>
+          <p><code>orzmc update</code> 一键升级工具自身:<code>--check</code> 先看有没有新版,<code>-v</code> 指定版本或绕过 GitHub 限流,<code>--file</code> 离线安装;pip / pipx 安装会自动识别并提示用包管理器升级。</p>
         </div>
       </div>
     </div>

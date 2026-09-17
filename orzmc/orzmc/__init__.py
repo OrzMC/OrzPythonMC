@@ -19,10 +19,12 @@ from orzmc.domain.types import GameType
 from orzmc.infra.fs import FileStore
 from orzmc.infra.log import NullReporter, Reporter, RichReporter
 from orzmc.infra.progress import NullProgress, ProgressSink, RichProgress
+from orzmc.infra.runner import ProcessRunner
 from orzmc.services.backup import Backup
 from orzmc.services.client import ClientService
 from orzmc.services.context import AppContext, Services
 from orzmc.services.selfinstall import InstallManifest, SelfUninstaller
+from orzmc.services.selfupdate import SelfUpdater, UpdateCheck
 from orzmc.services.server import ServerService
 from orzmc.services.versions import InstalledVersion, VersionManager
 from orzmc.version import __version__
@@ -49,15 +51,18 @@ __all__ = [
     "RichReporter",
     # domain
     "RuntimeOptions",
-    "ServerService",
     # services
+    "SelfUpdater",
+    "ServerService",
     "Services",
+    "UpdateCheck",
     "VersionEntry",
     "VersionManager",
     # versions
     "__version__",
     "backup_world",
     "build_launch_command",
+    "check_self_update",
     "deploy_server",
     "game_args",
     "install_java",
@@ -71,6 +76,7 @@ __all__ = [
     "required_java_major",
     "resolve_libraries",
     "uninstall_self",
+    "update_self",
 ]
 
 # ── entry points ─────────────────────────────────────────────────────────────
@@ -120,15 +126,19 @@ def list_versions(root_dir: str | None = None) -> list[InstalledVersion]:
     return VersionManager(root_dir=root_dir).list_versions()
 
 
-def remote_version_catalog(root_dir: str | None = None, update: bool = False) -> list[VersionEntry]:
-    """List all Mojang manifest versions (any type, newest first); installs nothing."""
-    options = RuntimeOptions(root_dir=root_dir or DEFAULT_ROOT)
-    return Services(options).mojang.version_entries(update=update)
+def remote_version_catalog(root_dir: str | None = None, refresh: bool = False) -> list[VersionEntry]:
+    """List all Mojang manifest versions (any type, newest first); installs nothing.
+
+    The manifest is cached with a 24h TTL; ``refresh=True`` bypasses the cache
+    and re-fetches from Mojang immediately.
+    """
+    options = RuntimeOptions(root_dir=root_dir or DEFAULT_ROOT, refresh=refresh)
+    return Services(options).mojang.version_entries()
 
 
-def remote_versions(root_dir: str | None = None, update: bool = False) -> list[str]:
-    """List Mojang release version ids (fetches/caches the manifest, installs nothing)."""
-    return [e.id for e in remote_version_catalog(root_dir, update) if e.is_release]
+def remote_versions(root_dir: str | None = None, refresh: bool = False) -> list[str]:
+    """List Mojang release version ids (cached manifest, installs nothing)."""
+    return [e.id for e in remote_version_catalog(root_dir, refresh) if e.is_release]
 
 
 def remove_version(
@@ -166,6 +176,48 @@ def uninstall_self(
     """
     return SelfUninstaller(reporter=reporter, root_dir=root_dir).uninstall(
         binary, remove_root=remove_root, yes=yes, force=force, confirm=confirm
+    )
+
+
+def check_self_update(
+    binary: str | None = None,
+    *,
+    version: str | None = None,
+    reporter: Reporter | None = None,
+) -> UpdateCheck:
+    """Resolve the current upgrade target for the tool itself; installs nothing.
+
+    Without ``version`` the latest GitHub Release is looked up (subject to the
+    unauthenticated API rate limit); with it no API call happens at all.
+    """
+    return SelfUpdater(reporter=reporter, binary=binary).check(version)
+
+
+def update_self(
+    binary: str,
+    *,
+    version: str | None = None,
+    file: str | None = None,
+    yes: bool = False,
+    force: bool = False,
+    reporter: Reporter | None = None,
+    sink: ProgressSink | None = None,
+    process: ProcessRunner | None = None,
+    confirm: Callable[[str], bool] | None = None,
+) -> UpdateCheck | None:
+    """Upgrade the installed ``orzmc`` binary itself (not a Minecraft version).
+
+    ``binary`` is the running executable (``sys.argv[0]``). ``file`` installs a
+    local binary instead of downloading (offline / test seam) and requires
+    ``version``. The swap itself is performed by a detached helper after this
+    process exits (a PyInstaller onefile binary must not replace its own file),
+    so a returned ``applied=True`` means "staged and handed off". Returns
+    ``None`` when the user declined, or a check with ``applied=False`` when
+    already up to date. ``confirm`` is consulted before the hand-off unless
+    ``yes`` is set.
+    """
+    return SelfUpdater(reporter=reporter, sink=sink, process=process, binary=binary).update(
+        version, file=file, yes=yes, force=force, confirm=confirm
     )
 
 

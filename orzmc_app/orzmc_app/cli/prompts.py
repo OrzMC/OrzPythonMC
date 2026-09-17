@@ -47,20 +47,21 @@ def is_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def resolve_version(version: str | None, root_dir: str | None) -> str | None:
+def resolve_version(version: str | None, root_dir: str | None, refresh: bool = False) -> str | None:
     """Resolve the Minecraft version for a command.
 
     Explicit value → used as-is. TTY without value → interactive keyboard
     picker over the full Mojang catalog (scroll, filter, release/snapshot
     toggle, Escape → latest). Non-TTY without value → ``None``, letting the
-    library fall back to the latest release.
+    library fall back to the latest release. ``refresh`` forwards
+    ``--refresh`` to the catalog (bypassing the 24h metadata cache).
     """
     if version:
         return version
     if not is_interactive():
         return None
     try:
-        catalog = _self.remote_version_catalog(root_dir=root_dir)
+        catalog = _self.remote_version_catalog(root_dir=root_dir, refresh=refresh)
     except Exception as exc:
         _console.print(f"[yellow]无法获取版本列表({exc}),回车使用最新[/yellow]")
         return None
