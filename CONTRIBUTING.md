@@ -57,6 +57,10 @@ gh run watch                                             # 跟进结果
 
 紧急情况下手动打 tag 也可以:`git tag vX.Y.Z && git push origin vX.Y.Z` —— `verify` 会挡住版本不一致,Release 会自动以 draft 建好并在二进制 + PyPI 都成功后发布。
 
+### 版本策略:预稳定期破坏性变更暂走 minor
+
+当前处于 2.x 预稳定期(API 仍在收敛、用户面很小),**破坏性 API 变更暂不使用 `feat!` / `BREAKING CHANGE:`**(那会让 release-please 直接推 major),而是走 minor 并在 CHANGELOG 里人工注明影响;等准备把 API 冻结成 3.0.0 时再启用 `!`。这条是刻意选择,不是疏忽。
+
 ### 需要人工配置/授权的一次性事项
 
 - `RELEASE_PLEASE_TOKEN`(可选):细粒度 PAT 存到 repo secret,让机器人开的 release PR 也触发 CI;不配则用默认 `GITHUB_TOKEN`(release PR 上无检查,风险低)。

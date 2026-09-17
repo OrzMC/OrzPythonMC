@@ -163,6 +163,7 @@ uv lock                            # 锁定依赖
   ```
   `ci.yml` 的 `binary`/`installer` 条件为 `(push 到分支) || inputs.full == true`;PR 默认只跑 `quality` + 6 平台 pytest,保持快速。
 - **版本号不手改**:`orzmc/version.py` 与 `orzmc_app/orzmc_app/__init__.py` 都带 `# x-release-please-version` 标记,由 release-please 的 release PR 一起 bump(两个文件锁步,`test_app_and_library_versions_match` 守着);`release-please-config.json` 用 generic updater 改这两处,`.release-please-manifest.json` 记录上一次发布的版本。因为两个 pyproject 都是 `dynamic`,`uv.lock` **不记录本地包版本**,release PR 不需要动 lock。
+- **版本策略(预稳定期)**:2.x 的破坏性 API 变更**不用** `feat!`/`BREAKING CHANGE:`(release-please 会直接推 major),走 minor + 在 `CHANGELOG.md` 里人工注明;等 API 冻结为 3.0.0 时再启用 `!`。
 - 依赖与 Actions 升级交给 `.github/dependabot.yml`(每周一,分组);`CONTRIBUTING.md` + PR 模板给人和 AI 智能体同一份清单。
 - 夜间验收失败会自动开/追加 issue(`acceptance.yml` 的 `notify` job),不再依赖人盯。
 
