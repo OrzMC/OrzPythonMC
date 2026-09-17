@@ -152,7 +152,7 @@ jobs:
     permissions:
       issues: write
     steps:
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@v9
         env:
           RESULTS: ${{ join(needs.*.result, ',') }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

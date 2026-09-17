@@ -23,7 +23,7 @@ jobs:
       # RELEASE_PLEASE_TOKEN 是可选的可选优化:用 PAT 建的 release PR 才会触发
       # CI(GITHUB_TOKEN 建的 PR 按设计不触发工作流)。没有它也能用,只是 release
       # PR 上没有检查——发版提交只含版本号与 CHANGELOG,风险低。
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
