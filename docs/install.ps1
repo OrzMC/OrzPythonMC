@@ -55,7 +55,9 @@ $ProgressPreference = 'SilentlyContinue' # 加速 Invoke-WebRequest 大文件下
 
 $Repo = 'OrzMC/OrzPythonMC'
 $BaseUrl = "https://github.com/$Repo"
-$ApiLatest = "https://api.github.com/repos/$Repo/releases/latest"
+# ORZMC_API_LATEST 是测试/镜像接缝:指到不可用地址即可验证限流兜底。
+if ($env:ORZMC_API_LATEST) { $ApiLatest = $env:ORZMC_API_LATEST }
+else { $ApiLatest = "https://api.github.com/repos/$Repo/releases/latest" }
 
 # 参数与运行期状态
 $script:Version = ''
@@ -133,6 +135,27 @@ function State-Base {
 }
 
 # ── 下载地址解析 ────────────────────────────────────────────────────────────
+# 最新版解析的兜底:releases/latest 会 302 到 releases/tag/<tag>。这个端点不是
+# REST API,不受「60 次/时/IP」限流影响(CI runner 与共享 NAT 用户常被限流)。
+function Get-ReleaseRedirectTag {
+    try {
+        $request = [System.Net.WebRequest]::Create("$BaseUrl/releases/latest")
+        $request.AllowAutoRedirect = $false
+        $request.Method = 'GET'
+        $request.Timeout = 15000
+        $response = $request.GetResponse()
+        $location = [string]$response.Headers['Location']
+        $response.Close()
+    }
+    catch {
+        return ''
+    }
+    if ($location -match '/releases/tag/([^/?#]+)') {
+        return $Matches[1]
+    }
+    return ''
+}
+
 function Resolve-Url {
     if ($script:File) { return } # 本地文件安装,无 URL
     if ($script:Version) {
@@ -140,7 +163,19 @@ function Resolve-Url {
         $script:Url = "$BaseUrl/releases/download/$script:Version/$script:Asset"
         return
     }
-    $release = Invoke-RestMethod -Uri $ApiLatest -Headers @{ 'User-Agent' = 'orzmc-installer' }
+    try {
+        $release = Invoke-RestMethod -Uri $ApiLatest -Headers @{ 'User-Agent' = 'orzmc-installer' }
+    }
+    catch {
+        # API 限流/网络失败 → 退回 302 端点,自己拼资产地址。
+        $tag = Get-ReleaseRedirectTag
+        if (-not $tag) {
+            die "无法获取最新版本信息(网络问题或 GitHub API 限流)。请指定版本重试: -version vX.Y.Z"
+        }
+        $script:LatestTag = $tag
+        $script:Url = "$BaseUrl/releases/download/$tag/$script:Asset"
+        return
+    }
     $match = @($release.assets | Where-Object { $_.name -eq $script:Asset })
     if (-not $match) {
         die "最新 release 中找不到资产 $($script:Asset)(可能尚未发布该平台产物)。请指定版本: -version vX.Y.Z"

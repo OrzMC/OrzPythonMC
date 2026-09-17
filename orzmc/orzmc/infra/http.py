@@ -60,6 +60,19 @@ class HttpClient:
         value = resp.headers.get("Content-Length")
         return int(value) if value and value.isdigit() else None
 
+    def head_location(self, url: str) -> str | None:
+        """Return the ``Location`` a URL redirects to, without following it.
+
+        Used as a rate-limit-proof fallback: ``github.com/<repo>/releases/latest``
+        answers 302 to ``.../releases/tag/<tag>`` from a non-API endpoint
+        (the REST API is limited to 60 requests/hour/IP).
+        """
+        try:
+            resp = self._session.head(url, timeout=self._timeout, allow_redirects=False)
+        except requests.RequestException:
+            return None
+        return resp.headers.get("Location")
+
     def download(self, url: str, dest_path: str, on_chunk: Any = None) -> int:
         """Stream ``url`` to ``dest_path`` atomically (tmp file + rename).
 

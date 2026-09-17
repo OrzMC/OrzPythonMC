@@ -227,11 +227,35 @@ class TestCheck:
         with pytest.raises(RuntimeError, match="--version"):
             SelfUpdater(http=FakeHttp(), fs=fs, binary=binary).check()
 
-    def test_api_response_without_tag_is_an_error(self, tmp_path) -> None:
+    def test_rate_limited_api_falls_back_to_the_release_redirect(self, tmp_path) -> None:
+        # GitHub API 限流(60 次/时/IP,CI 与共享 NAT 常年命中)时,走
+        # github.com/<repo>/releases/latest 的 302 Location 仍然能解析最新版。
+        fs, binary = _install(tmp_path)
+
+        class _Limited(FakeHttp):
+            def get_json(self, url, params=None, headers=None):
+                self.json_calls.append(url)
+                raise RuntimeError("API rate limit exceeded")
+
+        http = _Limited()
+        http.redirects = {"/releases/latest": f"https://github.com/OrzMC/OrzPythonMC/releases/tag/{_newer_tag()}"}
+        check = SelfUpdater(http=http, fs=fs, binary=binary).check()
+        assert check.latest == _newer_tag()
+        assert check.available is True
+        assert ("head_location", "https://github.com/OrzMC/OrzPythonMC/releases/latest") in http.requests
+
+    def test_api_without_tag_falls_back_to_the_redirect(self, tmp_path) -> None:
         fs, binary = _install(tmp_path)
         http = FakeHttp()
         http.json_responses = {API_LATEST: {"name": "no tag here"}}
-        with pytest.raises(RuntimeError, match="没有版本标签"):
+        http.redirects = {"/releases/latest": f"https://github.com/OrzMC/OrzPythonMC/releases/tag/{_newer_tag()}"}
+        assert SelfUpdater(http=http, fs=fs, binary=binary).check().latest == _newer_tag()
+
+    def test_both_sources_unavailable_is_an_error(self, tmp_path) -> None:
+        fs, binary = _install(tmp_path)
+        http = FakeHttp()
+        http.json_responses = {API_LATEST: {"name": "no tag here"}}
+        with pytest.raises(RuntimeError, match="无法获取最新版本信息"):
             SelfUpdater(http=http, fs=fs, binary=binary).check()
 
     def test_current_version_is_the_running_binary(self, tmp_path, running_version) -> None:

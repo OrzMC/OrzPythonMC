@@ -76,11 +76,17 @@ class FakeHttp(HttpClient):
         self.canned_archive: bytes | None = None
         self.canned: dict[str, bytes] = {}
         self.json_responses: dict[str, Any] = {}
+        self.redirects: dict[str, str] = {}
         self.requests: list[tuple[str, str]] = []
         self.json_calls: list[str] = []
 
     def content_length(self, url: str) -> int | None:
         return None
+
+    def head_location(self, url: str) -> str | None:
+        """Seeded 302 target for the rate-limit-proof fallback resolver."""
+        self.requests.append(("head_location", url))
+        return _longest_match(url, self.redirects)
 
     def get(self, url: str, params=None, headers=None, stream=False) -> NoReturn:
         raise AssertionError(f"unexpected get: {url}")

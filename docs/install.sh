@@ -121,6 +121,17 @@ detect_platform() {
 }
 
 # ── 下载地址解析 ─────────────────────────────────────────────────────────────
+# 最新版解析的兜底:releases/latest 会 302 到 releases/tag/<tag>。这个端点不是 REST
+# API,不受「60 次/时/IP」限流影响(CI runner 与共享 NAT 用户常被限流)。
+latest_tag_from_redirect() {
+    # 注意:不能带 -L(跟随完重定向后 %{redirect_url} 会是空串)。
+    REDIRECT="$(curl -fsS -o /dev/null -w '%{redirect_url}' "${BASE_URL}/releases/latest" 2>/dev/null || true)"
+    case "$REDIRECT" in
+        */releases/tag/*) printf '%s\n' "${REDIRECT##*/releases/tag/}" ;;
+        *) : ;;
+    esac
+}
+
 resolve_url() {
     if [ -n "$FILE" ]; then
         return # 本地文件安装,无 URL
@@ -133,20 +144,26 @@ resolve_url() {
         URL="${BASE_URL}/releases/download/${VERSION}/${ASSET}"
         return
     fi
-    API="https://api.github.com/repos/${REPO}/releases/latest"
+    # ORZMC_API_LATEST 是测试/镜像接缝:指到不可用地址即可验证限流兜底。
+    API="${ORZMC_API_LATEST:-https://api.github.com/repos/${REPO}/releases/latest}"
     BODY="$(curl -fsSL --retry 3 "$API" 2>/dev/null || true)"
-    if [ -z "$BODY" ]; then
-        die "无法获取最新版本信息(网络问题或 GitHub API 限流)。请指定版本重试: sh -s -- --version vX.Y.Z"
-    fi
     case "$BODY" in
-        *'"API rate limit exceeded"'*)
-            die "GitHub API 已限流(60 次/时/IP)。请指定版本安装: sh -s -- --version vX.Y.Z"
-            ;;
+        *'"API rate limit exceeded"'*) BODY="" ;;
     esac
-    URL="$(printf '%s\n' "$BODY" | grep -o '"browser_download_url": *"[^"]*'"${ASSET}"'[^"]*"' | head -n1 | sed 's/.*": *"//; s/"$//')"
-    if [ -z "$URL" ]; then
+    if [ -n "$BODY" ]; then
+        URL="$(printf '%s\n' "$BODY" | grep -o '"browser_download_url": *"[^"]*'"${ASSET}"'[^"]*"' | head -n1 | sed 's/.*": *"//; s/"$//')"
+        if [ -n "$URL" ]; then
+            return
+        fi
         die "最新 release 中找不到资产 ${ASSET}(可能尚未发布该平台产物)。请指定版本: --version vX.Y.Z"
     fi
+    # API 限流/网络失败 → 退回 302 端点,自己拼资产地址。
+    LATEST_TAG="$(latest_tag_from_redirect)"
+    if [ -z "$LATEST_TAG" ]; then
+        die "无法获取最新版本信息(网络问题或 GitHub API 限流)。请指定版本重试: sh -s -- --version vX.Y.Z"
+    fi
+    VERSION="$LATEST_TAG"
+    URL="${BASE_URL}/releases/download/${LATEST_TAG}/${ASSET}"
 }
 
 # ── 下载与校验 ───────────────────────────────────────────────────────────────
