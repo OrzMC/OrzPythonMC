@@ -30,7 +30,7 @@ class ForgeProvider(CoreProvider):
         if not prepare.force_download and self._is_installed(prepare):
             prepare.reporter.info("Forge 服务端已安装,跳过安装器(用 --force 重装)")
             return
-        forge = Forge(prepare.http)
+        forge = Forge(prepare.cache)
         full = forge.latest_full_version(prepare.version)
         build_dir = prepare.paths.server_build_dir()
         prepare.fs.ensure_dir(build_dir)

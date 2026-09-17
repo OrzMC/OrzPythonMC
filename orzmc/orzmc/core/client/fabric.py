@@ -12,7 +12,7 @@ class FabricProvider(ClientProvider):
     game_type = GameType.FABRIC
 
     def addon(self, prepare: ClientPrepare) -> ProfileAddon | None:
-        addon = Fabric(prepare.http, prepare.version).profile()
+        addon = Fabric(prepare.cache, prepare.version).profile()
         for lib in addon.libraries:
             if lib.url:
                 prepare.download(

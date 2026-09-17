@@ -35,6 +35,13 @@ class FileStore:
         except OSError:
             return -1
 
+    def mtime(self, path: str) -> float:
+        """Last-modification time in epoch seconds; 0.0 when unavailable."""
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
     def read_text(self, path: str, encoding: str = "utf-8") -> str:
         with open(path, encoding=encoding) as f:
             return f.read()

@@ -11,24 +11,30 @@ from __future__ import annotations
 
 from orzmc.core.server.base import CoreProvider, ServerPrepare
 from orzmc.domain.types import GameType
-from orzmc.infra.http import HttpClient
+from orzmc.infra.cache import MetadataCache
 
 API_BASE = "https://fill.papermc.io/v3"
 
 
 class PaperAPI:
-    def __init__(self, http: HttpClient) -> None:
-        self._http = http
+    def __init__(self, cache: MetadataCache) -> None:
+        self._cache = cache
 
     def download_url(self, mc_version: str) -> str:
         """Resolve the latest stable Paper build download URL for ``mc_version``."""
-        project = self._http.get_json(f"{API_BASE}/projects/paper")
+        project = self._cache.get_json(
+            self._cache.meta_path("paper-project"), f"{API_BASE}/projects/paper", desc="获取 Paper 版本列表"
+        )
         versions: dict[str, list[str]] = project.get("versions", {})
         matched = _match_version(versions, mc_version)
         if matched is None:
             raise RuntimeError(f"Paper 不支持 Minecraft {mc_version}")
 
-        build = self._http.get_json(f"{API_BASE}/projects/paper/versions/{matched}/builds/latest")
+        build = self._cache.get_json(
+            self._cache.meta_path("paper-build", matched),
+            f"{API_BASE}/projects/paper/versions/{matched}/builds/latest",
+            desc=f"获取 Paper 构建 ({matched})",
+        )
         downloads: dict[str, dict[str, str]] = build.get("downloads", {})
         server = downloads.get("server:default") or downloads.get("server:mojang") or {}
         url = server.get("url")
@@ -63,7 +69,7 @@ class PaperProvider(CoreProvider):
     game_type = GameType.PAPER
 
     def obtain(self, prepare: ServerPrepare) -> None:
-        url = PaperAPI(prepare.http).download_url(prepare.version)
+        url = PaperAPI(prepare.cache).download_url(prepare.version)
         prepare.download(
             url,
             prepare.paths.server_jar_path(),

@@ -44,8 +44,8 @@ class HttpClient:
         resp.raise_for_status()
         return resp
 
-    def get_json(self, url: str, params: dict[str, str] | None = None) -> Any:
-        return self.get(url, params=params).json()
+    def get_json(self, url: str, params: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Any:
+        return self.get(url, params=params, headers=headers).json()
 
     def get_text(self, url: str, params: dict[str, str] | None = None) -> str:
         return self.get(url, params=params).text

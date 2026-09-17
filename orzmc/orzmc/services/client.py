@@ -127,6 +127,7 @@ class ClientService:
             fs=self._fs,
             reporter=self._reporter,
             http=self._http,
+            cache=self._services.cache,
             process=self._services.process,
             download=self._services.downloader.download_file,
             resolve_build_java=self._services.java_env.resolve,

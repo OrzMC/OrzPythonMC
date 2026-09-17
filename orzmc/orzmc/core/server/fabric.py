@@ -39,7 +39,7 @@ class FabricProvider(CoreProvider):
             force=prepare.force_download,
         )
 
-        fabric = Fabric(prepare.http, prepare.version)
+        fabric = Fabric(prepare.cache, prepare.version)
         loader = fabric.latest_loader_version()
         installer_version = fabric.latest_installer_version()
         build_dir = prepare.paths.server_build_dir()

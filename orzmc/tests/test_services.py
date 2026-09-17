@@ -25,16 +25,24 @@ from orzmc import (
     resolve_libraries,
 )
 from orzmc.core.forge import PROMOTIONS_URL
+from orzmc.core.mojang import VERSION_MANIFEST_URL
 from orzmc.core.server import CoreProvider
 from orzmc.core.server.base import ServerPrepare
 from orzmc.core.server.paper import PaperAPI
 from orzmc.domain.libraries import os_arch, os_key
+from orzmc.infra.cache import MetadataCache
 from orzmc.services.java import JavaEnv
 
 
 def _services(tmp_path, reporter: FakeReporter, sink: FakeSink, http: FakeHttp, **options) -> Services:
     base = RuntimeOptions(root_dir=str(tmp_path), version="1.20.4", **options)
     return Services(base, reporter=reporter, sink=sink, http=http, fs=FileStore())
+
+
+def _cache(tmp_path, http: FakeHttp, **kwargs) -> MetadataCache:
+    """A MetadataCache for direct adapter tests (PaperAPI / Fabric / Forge)."""
+    fs = FileStore()
+    return MetadataCache(http, fs, PathLayout(root=str(tmp_path)).cache_dir(), **kwargs)
 
 
 class TestJavaEnv:
@@ -207,6 +215,32 @@ class TestMojangMeta:
         assert services.mojang.release_version_ids() == ["1.21.4", "1.21.3", "1.20.4"]
 
 
+class TestMetadataCacheWiring:
+    def test_manifest_cache_is_reused_across_runs(self, tmp_path, reporter, sink, http) -> None:
+        # a second invocation must read the cached manifest, not the network
+        http.json_responses = {VERSION_MANIFEST_URL: {"versions": [{"id": "1.20.4", "type": "release"}]}}
+        first = _services(tmp_path, reporter, sink, http)
+        assert first.mojang.release_version_ids() == ["1.20.4"]
+        calls = len(http.json_calls)
+        second = _services(tmp_path, reporter, sink, http)
+        assert second.mojang.release_version_ids() == ["1.20.4"]
+        assert len(http.json_calls) == calls
+
+    def test_options_refresh_reaches_the_shared_cache(self, tmp_path, reporter, sink, http) -> None:
+        services = _services(tmp_path, reporter, sink, http, refresh=True)
+        assert services.cache.refresh is True
+        # every provider reads that cache, and ``for_version`` keeps the flag
+        assert services.for_version("1.20.4").cache.refresh is True
+
+    def test_refresh_flag_bypasses_the_cached_manifest(self, tmp_path, reporter, sink, http) -> None:
+        http.json_responses = {VERSION_MANIFEST_URL: {"versions": [{"id": "1.20.4", "type": "release"}]}}
+        _services(tmp_path, reporter, sink, http).mojang.release_version_ids()
+        calls = len(http.json_calls)
+        refreshed = _services(tmp_path, reporter, sink, http, refresh=True)
+        refreshed.mojang.release_version_ids()
+        assert len(http.json_calls) == calls + 1
+
+
 class TestDownloader:
     def test_prepare_client(self, tmp_path, reporter, sink, http) -> None:
         http.canned_archive = b"{}"  # used for both the client jar and the index json
@@ -354,6 +388,7 @@ def _server_prepare(
         fs=fs,
         reporter=FakeReporter(),
         http=http,
+        cache=MetadataCache(http, fs, paths.cache_dir()),
         process=process,
         download=fake_download,
         resolve_build_java=lambda major, need_jdk=False, confirm=None: "/fake/java",
@@ -446,7 +481,7 @@ class TestServerProviders:
         assert process.last_cmd is None  # installer never ran
         assert http.requests == []  # no promotions / installer download
 
-    def test_paper_api_prefers_server_default_url(self) -> None:
+    def test_paper_api_prefers_server_default_url(self, tmp_path) -> None:
         # Fill API: the concrete download url comes straight from the latest
         # build response; server:default wins over server:mojang when both exist.
         http = FakeHttp()
@@ -468,10 +503,11 @@ class TestServerProviders:
             },
         }
         assert (
-            PaperAPI(http).download_url("1.20.4") == "https://fill-data.papermc.io/v1/objects/abc/paper-1.20.4-499.jar"
+            PaperAPI(_cache(tmp_path, http)).download_url("1.20.4")
+            == "https://fill-data.papermc.io/v1/objects/abc/paper-1.20.4-499.jar"
         )
 
-    def test_paper_api_major_group_uses_newest_concrete(self) -> None:
+    def test_paper_api_major_group_uses_newest_concrete(self, tmp_path) -> None:
         # a group-level request ("1.20") resolves to the newest concrete within it
         http = FakeHttp()
         http.json_responses = {
@@ -486,7 +522,10 @@ class TestServerProviders:
                 },
             },
         }
-        assert PaperAPI(http).download_url("1.20") == "https://fill-data.papermc.io/v1/objects/d/paper-1.20.6-506.jar"
+        assert (
+            PaperAPI(_cache(tmp_path, http)).download_url("1.20")
+            == "https://fill-data.papermc.io/v1/objects/d/paper-1.20.6-506.jar"
+        )
 
     def test_paper_server_uses_fill_api_latest_build(self, tmp_path) -> None:
         http = FakeHttp()

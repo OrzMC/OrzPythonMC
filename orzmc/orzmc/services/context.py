@@ -9,6 +9,7 @@ from orzmc.core.mojang import Mojang
 from orzmc.domain.options import RuntimeOptions
 from orzmc.domain.paths import DEFAULT_ROOT, PathLayout
 from orzmc.domain.types import GameType
+from orzmc.infra.cache import MetadataCache
 from orzmc.infra.fs import FileStore
 from orzmc.infra.http import HttpClient
 from orzmc.infra.log import NullReporter, Reporter
@@ -58,9 +59,20 @@ class Services:
         self.process = ProcessRunner(self.reporter)
         self.context = AppContext.build(options)
         paths = self.context.paths
-        self.mojang = Mojang(self.http, self.fs, paths.version_manifest_path(), paths.version_jsons_dir())
         self.downloader = Downloader(self.http, self.fs, self.reporter, self.sink, paths)
         self.java_env = JavaEnv(self.http, self.fs, self.reporter, self.sink, paths)
+        # One metadata cache per invocation: it carries the library-wide TTL and
+        # the CLI ``--refresh`` flag, so every remote API (Mojang / Fabric /
+        # Paper / Forge) shares one refresh + TTL policy.
+        self.cache = MetadataCache(
+            self.http,
+            self.fs,
+            paths.cache_dir(),
+            refresh=options.refresh,
+            reporter=self.reporter,
+            sink=self.sink,
+        )
+        self.mojang = Mojang(self.cache, paths.version_manifest_path(), paths.version_jsons_dir())
 
     def resolve_java(self, major: int, confirm: Callable[[int, bool], bool] | None = None) -> str:
         """Java binary for a version JSON's required major — shared by client & server.

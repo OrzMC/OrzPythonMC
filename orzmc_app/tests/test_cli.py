@@ -7,7 +7,7 @@ import sys
 
 from typer.testing import CliRunner
 
-from orzmc import FileStore
+from orzmc import FileStore, UpdateCheck
 from orzmc_app import __version__
 from orzmc_app.cli import app
 
@@ -27,7 +27,7 @@ def test_version() -> None:
 def test_help_lists_all_commands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for name in ("client", "server", "remove", "list", "backup", "version", "self-uninstall"):
+    for name in ("client", "server", "remove", "update", "list", "backup", "version", "self-uninstall"):
         assert name in result.stdout
 
 
@@ -62,7 +62,7 @@ def test_client_rejects_unknown_type() -> None:
 def test_client_accepts_forge_type(monkeypatch) -> None:
     calls: list[str] = []
 
-    def fake_resolve(version, root_dir=None):
+    def fake_resolve(version, root_dir=None, refresh=False):
         return version or "1.20.4"
 
     def fake_launch(options, **kwargs) -> None:
@@ -78,7 +78,7 @@ def test_client_accepts_forge_type(monkeypatch) -> None:
 def test_client_passes_explicit_username(monkeypatch) -> None:
     usernames: list[str] = []
 
-    def fake_resolve(version, root_dir=None):
+    def fake_resolve(version, root_dir=None, refresh=False):
         return version or "1.20.4"
 
     def fake_launch(options, **kwargs) -> None:
@@ -95,7 +95,7 @@ def test_client_defaults_username_to_guest_when_not_tty(monkeypatch) -> None:
     """CliRunner 非 TTY → 真实 resolve_username 静默用默认 guest,不弹询问。"""
     usernames: list[str] = []
 
-    def fake_resolve(version, root_dir=None):
+    def fake_resolve(version, root_dir=None, refresh=False):
         return version or "1.20.4"
 
     def fake_launch(options, **kwargs) -> None:
@@ -112,7 +112,7 @@ def test_client_calls_resolve_username(monkeypatch) -> None:
     """未指定 -u → resolve_username(None) 被调用,返回值透传进 launch_client。"""
     calls: list[object] = []
 
-    def fake_resolve(version, root_dir=None):
+    def fake_resolve(version, root_dir=None, refresh=False):
         return version or "1.20.4"
 
     def fake_username(username):
@@ -133,7 +133,7 @@ def test_client_calls_resolve_username(monkeypatch) -> None:
 def test_server_accepts_fabric_and_forge(monkeypatch) -> None:
     types_seen: list[str] = []
 
-    def fake_resolve(version, root_dir=None):
+    def fake_resolve(version, root_dir=None, refresh=False):
         return version or "1.20.4"
 
     def fake_deploy(options, **kwargs) -> None:
@@ -145,6 +145,115 @@ def test_server_accepts_fabric_and_forge(monkeypatch) -> None:
         result = runner.invoke(app, ["server", "-t", game_type, "--version", "1.20.4"])
         assert result.exit_code == 0, result.stdout
     assert types_seen == ["vanilla", "paper", "fabric", "forge"]
+
+
+def test_refresh_flag_reaches_resolve_and_options(monkeypatch) -> None:
+    """--refresh must reach both the picker's catalog and RuntimeOptions."""
+    resolves: list[bool] = []
+    client_seen: list[bool] = []
+    server_seen: list[bool] = []
+
+    def fake_resolve(version, root_dir=None, refresh=False):
+        resolves.append(refresh)
+        return version or "1.20.4"
+
+    monkeypatch.setattr(app_module, "resolve_version", fake_resolve)
+    monkeypatch.setattr(app_module, "resolve_username", lambda username: username or "guest")
+    monkeypatch.setattr(app_module, "launch_client", lambda options, **kwargs: client_seen.append(options.refresh))
+    monkeypatch.setattr(app_module, "deploy_server", lambda options, **kwargs: server_seen.append(options.refresh))
+
+    client = runner.invoke(app, ["client", "--version", "1.20.4", "--refresh"])
+    assert client.exit_code == 0, client.stdout
+    server = runner.invoke(app, ["server", "--version", "1.20.4", "--refresh"])
+    assert server.exit_code == 0, server.stdout
+    assert resolves == [True, True]
+    assert client_seen == [True]
+    assert server_seen == [True]
+
+
+def test_refresh_defaults_to_off(monkeypatch) -> None:
+    seen: list[bool] = []
+
+    monkeypatch.setattr(app_module, "resolve_version", lambda version, root_dir=None, refresh=False: version)
+    monkeypatch.setattr(app_module, "resolve_username", lambda username: username or "guest")
+    monkeypatch.setattr(app_module, "launch_client", lambda options, **kwargs: seen.append(options.refresh))
+    result = runner.invoke(app, ["client", "--version", "1.20.4"])
+    assert result.exit_code == 0, result.stdout
+    assert seen == [False]
+
+
+class TestUpdateCommand:
+    """`orzmc update` wiring: check reporting, flag passthrough, cancel, errors."""
+
+    def test_check_reports_both_versions(self, monkeypatch) -> None:
+        seen: list[tuple] = []
+
+        def fake_check(binary, version=None, reporter=None):
+            seen.append((binary, version))
+            return UpdateCheck(
+                current="v1.0.0", latest="v2.0.0", asset="orzmc-x", platform="linux-x86_64", available=True
+            )
+
+        monkeypatch.setattr(app_module, "check_self_update", fake_check)
+        result = runner.invoke(app, ["update", "--check"])
+        assert result.exit_code == 0, result.stdout
+        assert "v1.0.0" in result.stdout and "v2.0.0" in result.stdout
+        assert "有新版本可用" in result.stdout
+        assert seen[0][1] is None
+
+    def test_check_reports_up_to_date(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            app_module,
+            "check_self_update",
+            lambda binary, version=None, reporter=None: UpdateCheck(
+                current="v2.0.0", latest="v2.0.0", asset="orzmc-x", platform="linux-x86_64", available=False
+            ),
+        )
+        result = runner.invoke(app, ["update", "--check"])
+        assert result.exit_code == 0, result.stdout
+        assert "已是最新版本" in result.stdout
+
+    def test_flags_reach_update_self(self, monkeypatch) -> None:
+        calls: list[dict] = []
+
+        def fake_update(binary, **kwargs):
+            calls.append(kwargs)
+            return UpdateCheck(
+                current="v1.0.0", latest="v2.0.0", asset="orzmc-x", platform="linux-x86_64", applied=True
+            )
+
+        monkeypatch.setattr(app_module, "update_self", fake_update)
+        result = runner.invoke(app, ["update", "--version", "v2.0.0", "--file", "/tmp/orzmc-new", "--yes", "--force"])
+        assert result.exit_code == 0, result.stdout
+        assert calls[0]["version"] == "v2.0.0"
+        assert calls[0]["file"] == "/tmp/orzmc-new"
+        assert calls[0]["yes"] is True
+        assert calls[0]["force"] is True
+        assert calls[0]["confirm"] is None  # non-TTY: never prompt
+
+    def test_cancelled_upgrade_is_reported(self, monkeypatch) -> None:
+        monkeypatch.setattr(app_module, "update_self", lambda binary, **kwargs: None)
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 0, result.stdout
+        assert "已取消升级" in result.stdout
+
+    def test_update_error_exits_nonzero(self, monkeypatch) -> None:
+        def boom(binary, **kwargs):
+            raise RuntimeError("检测到 pip 安装")
+
+        monkeypatch.setattr(app_module, "update_self", boom)
+        result = runner.invoke(app, ["update"])
+        assert result.exit_code == 1
+        assert "检测到 pip 安装" in result.stdout
+
+    def test_check_error_exits_nonzero(self, monkeypatch) -> None:
+        def boom(binary, version=None, reporter=None):
+            raise RuntimeError("GitHub API 已限流")
+
+        monkeypatch.setattr(app_module, "check_self_update", boom)
+        result = runner.invoke(app, ["update", "--check"])
+        assert result.exit_code == 1
+        assert "GitHub API 已限流" in result.stdout
 
 
 def test_remove_server_requires_type() -> None:

@@ -1,8 +1,12 @@
-"""Self-uninstall: remove the installed binary, restore PATH, optionally remove game data.
+"""Install record + self-uninstall: remove the binary, restore PATH, drop game data.
 
 Backs the ``orzmc self-uninstall`` CLI command. Follows the ``VersionManager`` /
 ``Backup`` injection pattern: pure filesystem + reporter, no network, no
 system-level process management.
+
+The install record (``install.conf``) and the "is this a real install?" guards
+shared here are also used by :mod:`orzmc.services.selfupdate` — self-upgrade
+has the same notion of *what* was installed and *where*.
 """
 
 from __future__ import annotations
@@ -20,6 +24,51 @@ from orzmc.infra.log import NullReporter, Reporter
 MANIFEST_FILENAME = "install.conf"
 BINARY_FALLBACK_NAME = ".orzmc-manifest"
 SCHEMA = 1
+
+
+def looks_like_dev(binary: str) -> bool:
+    """True when the binary sits in a venv / site-packages / PyInstaller temp dir.
+
+    Guards both self-uninstall and self-update: replacing or deleting a
+    developer/pip-managed artifact would break the tool that owns it.
+    """
+    parts = os.path.abspath(binary).replace(os.sep, "/").split("/")
+    for part in parts:
+        if part in (".venv", "venv", "env") or part.startswith("_MEI"):
+            return True
+    lowered = binary.lower()
+    if "site-packages" in lowered or "dist-packages" in lowered:
+        return True
+    mei = getattr(sys, "_MEIPASS", None)
+    return isinstance(mei, str) and os.path.dirname(os.path.abspath(mei)) == os.path.dirname(binary)
+
+
+def is_pip_managed(binary: str) -> bool:
+    """True when pip/pipx owns the binary, so upgrading must go through it."""
+    lowered = binary.lower()
+    if "site-packages" in lowered or "dist-packages" in lowered:
+        return True
+    directory = os.path.dirname(binary)
+    if not os.path.isdir(directory):
+        return False
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return False
+    return any(name.endswith(".dist-info") or name.endswith(".egg-info") for name in entries)
+
+
+def schedule_delete_on_reboot(path: str) -> bool:
+    """Ask Windows to delete a locked file at next boot; False elsewhere/on failure."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+
+        MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
+        return bool(cast(Any, ctypes).windll.kernel32.MoveFileExW(path, None, MOVEFILE_DELAY_UNTIL_REBOOT))
+    except Exception:
+        return False
 
 
 def default_state_dir() -> str:
@@ -151,7 +200,7 @@ class SelfUninstaller:
         binary was removed.
         """
         binary = os.path.abspath(os.path.expanduser(binary))
-        if not force and self._looks_like_dev(binary):
+        if not force and looks_like_dev(binary):
             raise RuntimeError(
                 "检测到疑似开发环境安装(venv / site-packages / PyInstaller 临时目录),已拒绝卸载;"
                 "确认无误可加 --force 继续"
@@ -161,7 +210,7 @@ class SelfUninstaller:
         root = self._root_override or (found[1].root_dir if found else DEFAULT_ROOT)
 
         if found is None:
-            if self._detect_pip_managed(binary):
+            if is_pip_managed(binary):
                 self._reporter.warn("检测到 pip 安装的 orzmc-app,请用 pip uninstall orzmc-app 卸载")
                 self._handle_root(root, remove_root=remove_root, yes=yes, confirm=confirm)
                 return False
@@ -185,33 +234,6 @@ class SelfUninstaller:
         return True
 
     # ── internals ──────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _looks_like_dev(binary: str) -> bool:
-        """True when the binary sits in a venv / pip site-packages / PyInstaller temp."""
-        parts = binary.replace(os.sep, "/").split("/")
-        for part in parts:
-            if part in (".venv", "venv") or part.startswith("_MEI"):
-                return True
-        lowered = binary.lower()
-        if "site-packages" in lowered or "dist-packages" in lowered:
-            return True
-        mei = getattr(sys, "_MEIPASS", None)
-        return isinstance(mei, str) and os.path.dirname(os.path.abspath(mei)) == os.path.dirname(binary)
-
-    def _detect_pip_managed(self, binary: str) -> bool:
-        """True when pip owns the binary (venv/pip-managed), so we don't break its bookkeeping."""
-        lowered = binary.lower()
-        if "site-packages" in lowered or "dist-packages" in lowered:
-            return True
-        directory = os.path.dirname(binary)
-        if not os.path.isdir(directory):
-            return False
-        try:
-            entries = os.listdir(directory)
-        except OSError:
-            return False
-        return any(name.endswith(".dist-info") or name.endswith(".egg-info") for name in entries)
 
     def _restore_path(self, manifest: InstallManifest) -> bool:
         # rc 文件式安装(install.sh 记录 path_file+path_line)在 Windows 上
@@ -297,15 +319,9 @@ class SelfUninstaller:
             return
         except OSError:
             pass
-        try:
-            import ctypes
-
-            MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
-            if cast(Any, ctypes).windll.kernel32.MoveFileExW(binary, None, MOVEFILE_DELAY_UNTIL_REBOOT):
-                self._reporter.warn("二进制被占用,已标记重启后删除")
-                return
-        except Exception:
-            pass
+        if schedule_delete_on_reboot(binary):
+            self._reporter.warn("二进制被占用,已标记重启后删除")
+            return
         self._reporter.warn(f"无法删除二进制:{binary},请手动删除")
 
     def _handle_root(

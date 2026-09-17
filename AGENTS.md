@@ -35,7 +35,9 @@ orzmc/services → orzmc/core → orzmc/domain + orzmc/infra
 - **依赖只允许单向向下**:`domain` 与 `infra` 最底层;`core` 适配外部 API(Mojang 元数据、Fabric/Forge 附加件、服务端核心策略);`services` 编排用例。
 - **客户端/服务端核心策略(对称镜像)**:`core/server/` 定义 `CoreProvider` 抽象 + `ServerPrepare` 注入接口,`vanilla/paper/fabric/forge` 四个 provider 自注册;`core/client/` 定义 `ClientProvider` 抽象 + `ClientPrepare` 注入接口,`vanilla/fabric/forge` 三个 provider 自注册(paper 无客户端,返回 `None`)。`ClientService`/`ServerService` 只按 `GameType` 分发,**改一种类型不影响其它类型实现**。各 provider 的 Forge/Fabric 复杂度收敛在各自文件内;`core` **不 import services 层**——`download`/`resolve_build_java` 等编排 seam 由 services 注入(依赖倒置),Provider 内只依赖 domain + infra。
 - **Forge 用 Maven API**:`core/forge.py` 以 `promotions_slim.json` 解析 `<mc>-<build>` 版本、下载官方安装器;客户端/服务端 provider 共用。客户端启动定义嵌在安装器内 `version.json`,用 `zipfile` 读取(无需运行安装器);服务端用 `--installServer` 安装。不再做 HTML 抓取。
-- **协议解耦**:`orzmc/infra/log.py` 定义 `Reporter`,`orzmc/infra/progress.py` 定义 `ProgressSink`。库内置 rich 默认实现(`RichReporter`/`RichProgress`)。**禁止**库内直接 `print` / `os.system`。
+- **协议解耦**:`orzmc/infra/log.py` 定义 `Reporter`,`orzmc/infra/progress.py` 定义 `ProgressSink`。库内置 rich 默认实现(`RichReporter`/`RichProgress`)。**禁止**库内直接 `print` / `os.system`。`RichProgress` 的 live 判活必须用 `Progress.live.is_started`(`live` 是 Live 实例、恒真,旧 `if not live` 导致 live 永不 start、进度条从不渲染);`finish()` 在任务清空后主动 `stop()` 收掉 live 区,避免后续 plain 日志与残留清行序列互相干扰;字节计数列 `_count_column()` 对 `total is None` 渲染空串,纯文本渲染函数可单测。
+- **元数据缓存与刷新(统一策略)**:`orzmc/infra/cache.py` 的 `MetadataCache` 是唯一缓存层——Mojang 版本清单、version JSON、fabric-meta、Paper Fill API、Forge promotions 全部走它。策略三条:**TTL 24h**(`DEFAULT_TTL`,按文件 mtime + 注入时钟 `now` 判定,`ttl<=0` 表示永不复用);**`refresh=True` 绕过所有缓存读**(CLI `--refresh` → `RuntimeOptions.refresh` → `Services.cache`,`for_version` 也保留);**拉取失败时回退到磁盘上(可能过期的)旧副本**并 warn,只有完全没有缓存才抛错。缓存文件:`cache/version_manifest.json`(沿用原路径)、`cache/versions/<v>.json`(内容寻址 + sha1 校验,refresh 也强制绕过)、`cache/meta/<adapter>/<key>.json`(`meta_path(*parts)` 生成,片段做可移植字符清洗)。名称语义:`update` 专指「升级 CLI 自身」(见下文 `orzmc update`),**不**用于元数据刷新。
+- **下载进度统一**:`orzmc/infra/transfer.py` 的 `download_with_progress(http, url, dest, sink, desc)` 是唯一「带字节进度下载」入口(`Downloader.download_file`、`JavaEnv`、`Mojang.version_json` 共用);元数据 JSON 请求用 `ProgressSink.status(desc)`(默认 = `start(desc, None)`,不定长进度条),慢网不再静默等待。
 - **路径纯函数**:`PathLayout`(domain)只拼路径、**不建目录**;建目录统一在 service 内 `fs.ensure_dir`。
 - **Java 沙盒**:运行时安装在 `<root>/java/<major>/`,用 `bin/java` 启动;版本要求读自版本 JSON `javaVersion.majorVersion`(缺失默认 8)。JRE 即可满足所有类型运行,无需完整 JDK。
 - **服务端启动与关闭**:`server` 有独立 `--nogui` 选项(无窗口;老用法 `--server-args nogui` 仍兼容,`_build_server_command` 判定重不重复注入)。启动后子进程继承父进程 stdin,终端输入 `stop` 即保存退出;Ctrl-C 由 `ProcessRunner.run_stream` 优雅回收——子进程同在前台进程组也收到 SIGINT,父进程捕获 `KeyboardInterrupt` 后等待其保存退出(关闭日志经 `on_line` 透传),超 60s 未退先 SIGTERM 再 SIGKILL,最后 re-raise 让 CLI 报"已取消"返回 130,不遗留孤儿进程。
@@ -46,7 +48,7 @@ orzmc/services → orzmc/core → orzmc/domain + orzmc/infra
 ```
 python/                         # uv workspace 根
   pyproject.toml  uv.lock  AGENTS.md  README.md
-  .github/workflows/{ci,acceptance,release,pages}.yml  scripts/{build,acceptance}.py
+  .github/workflows/{ci,acceptance,release,pages}.yml  scripts/{build,acceptance,accept_selfupdate}.py
   docs/index.html                # 官网(静态单页,GitHub Pages 托管)
   docs/install.sh  install.ps1   # 一键安装器(Unix sh / Windows PowerShell)
   docs/installer-design.md       # 安装器方案设计(历史评审稿,参考)
@@ -104,7 +106,15 @@ python/                         # uv workspace 根
 - **PATH 还原**:Unix 从 `path_file` 删精确 `path_line` 行;Windows 从 User PATH(winreg,stdlib,guard import)移除记录 token 并广播 `WM_SETTINGCHANGE`,失败只 warn。
 - **PyInstaller onefile 自删除限制**:删除正在运行的 onefile 可执行文件后,任何后续 PYZ 懒加载 import 都会 `SystemExit`——**二进制删除必须是最后一个操作**(所有 reporter 输出之后)。Windows 锁定时 `rename` + `MoveFileExW(MOVEFILE_DELAY_UNTIL_REBOOT)` 兜底并提示重启后删除。
 
-**CI `installer` job(ci.yml)**:push-only(发版 tag 与 PR 不跑,同 `binary`),6 平台矩阵,`needs: quality`。**鸡生蛋**:最新已发布二进制尚不含 `self-uninstall`,e2e 必须本地构建 + `--file` 接缝,不能拉 release。Unix(`shell: bash`):`XDG_STATE_HOME=$RUNNER_TEMP/orzmc-state` + `--dir` + `--no-modify-rc`;Windows(`shell: pwsh`):`LOCALAPPDATA=$RUNNER_TEMP\orzmc-state` + `ORZMC_NO_RC=1`,`powershell -File` 跑 PS 5.1。闭环:安装 → `version` → `self-uninstall --yes` → 断言二进制与 manifest 已删。环境隔离保证不碰真实 PATH / rc / 用户目录。
+**`orzmc update`(库 `orzmc/services/selfupdate.py`,公共 API `check_self_update` / `update_self`)**:升级的是**工具自身二进制**。名称语义已固定:`update` = 自升级 CLI,`self-uninstall` = 卸载,`remove`/`list` = Minecraft 版本。流程:护栏 → 解析目标版本 → 下载/校验 → **交接给分离助手在父进程退出后替换二进制** → 重写 `install.conf`。
+- **为何必须延迟替换**:PyInstaller onefile 的 PYZ 归档是**按需**从 `<可执行文件>?<offset>`(引导器写入的 `sys._pyinstaller_pyz`)读取的,运行中替换自身会让下一个尚未 import 的模块读坏归档(真机复现 `zlib.error: incorrect header check`);Windows 还禁止覆盖/删除运行中的 exe。所以 `_handoff` 用 `ProcessRunner.run_detached` 拉起助手(`applier_command()`:POSIX `/bin/sh` 轮询 `kill -0 <pid>` 后 `mv -f`;Windows `powershell` 轮询 `Get-Process` 后 `Move-Item -Force`,失败回退 `[IO.File]::Copy`+`Remove-Item`),助手是**唯一**执行最终 rename 的角色,两平台同一套机制。故 `UpdateCheck.applied=True` 的含义是「已暂存并交接」,**命令退出后才生效**。
+- 暂存固定 `<install_dir>/.orzmc-update.tmp`(与目标同卷 → rename 原子);交前校验 magic(ELF/Mach-O/PE,HTML/JSON 一律拒绝);失败清理暂存、旧版本原样保留。
+- **当前版本以运行中二进制的 `orzmc/version.py` 为准**(`current_version()`);`install.conf` 只是安装记录(可能是 `local-build`,或被「已交接未落地」提前写上)——用内嵌版本判断才能自愈:交接失败时下次仍会重试。
+- 选项/回退:无参走 GitHub API `releases/latest`(未认证 60 次/时/IP),失败提示 `--version vX.Y.Z`(指定版本完全不碰 API);`--check` 只查询;`--file <本地二进制>` + `--version`(离线 / CI 接缝);`--yes` 跳过确认;`--force` 仅绕过开发环境护栏(pip/pipx 托管**始终**拒绝,提示 `pip install -U orzmc-app`)。
+- **两个 PowerShell 都要验收**:安装器声明 5.1+,而 Windows 用户默认拿到的是 5.1(`powershell`,字节级误解码 octet-stream 的 `.ps1`)、现代环境是 7.x(`pwsh`)——两者在编码、iex 作用域、`-UseBasicParsing` 语义上并不一致,故必须分别真机跑,不能只测「5.1 子集写法」。harness 用 `--powershell <exe>` 选择 shell、`--expect-ps-major {5,7}` 断死主版本(否则机器上 `powershell` 被换成 7 会假通过),并打印 `$PSVersionTable` 作为证据。自升级助手固定在 Windows 用 `powershell`(5.1 一定存在,`pwsh` 不保证),与「用哪个 shell 跑安装器」是两件事。
+- 本地/CI 验收:`scripts/accept_selfupdate.py`(跨平台 stdlib,`uv run python scripts/accept_selfupdate.py [--skip-build] [--skip-download] [--skip-oneline] [--keep] [--powershell pwsh --expect-ps-major 7]`)——覆盖 PowerShell 运行时信息、安装器、`--check`、`--file` 延迟替换真的落地(sha256 对比)、真实下载、失败不破坏旧文件、venv 护栏、**管道入口**(`irm \| iex` / `curl \| sh`,用内置 loopback HTTP 服务模拟 GitHub Pages 的 `application/octet-stream`,断言中文未被误解码=编码自愈生效)、卸载闭环,详见 CI `installer` job。
+
+**CI `installer` job(ci.yml)**:push-only(发版 tag 与 PR 不跑,同 `binary`),6 平台矩阵,`needs: quality`。**鸡生蛋**:最新已发布二进制尚不含 `self-uninstall`/`update`,e2e 必须本地构建 + `--file` 接缝,不能拉 release。`Build binary` 后用**一个跨平台 harness** `scripts/accept_selfupdate.py --skip-build`(Unix 跑一次;Windows **跑两次**——`--powershell powershell --expect-ps-major 5` 与 `--powershell pwsh --expect-ps-major 7`,分别断言 PS 5.1 / 7.x)。步骤:PS 运行时信息 → `install --file` 到临时目录 → `update --check` → `update --file <系统可执行文件> -v v9.9.9`(**轮询 sha256 证明助手真的落地** + 暂存文件消失 + 记录改写)→ `update -v <最新 tag>`(真实下载)→ 不存在版本失败不得破坏旧文件 → venv 路径被护栏拒绝 → **管道入口**(内置 loopback HTTP 服务把 `docs/` 按 GitHub Pages 的 Content-Type 提供;Windows 跑**两种**:`irm` + `[scriptblock]::Create` + `-file/-dir`(不下载资产)与**字面 `irm … \| iex`**(靠 `ORZMC_BIN`/`ORZMC_NO_RC`/`ORZMC_ROOT_DIR` 环境接缝改道,含真实 release 下载);Unix 走 `curl \| sh -s --`;断言退出码、二进制、中文未被误解码、独立安装记录)→ `self-uninstall` 删二进制 + 记录且不删游戏数据。harness 内部把 state 重定向到自己的临时目录(`XDG_STATE_HOME` / `LOCALAPPDATA`,`ORZMC_ROOT_DIR` 把游戏根也关进沙箱)并传 `--no-modify-rc` / `ORZMC_NO_RC=1`,PATH / rc / 用户目录一律不碰。
 
 ## 常用命令
 
@@ -117,9 +127,12 @@ uv run --all-packages pytest        # 全部测试
 uv run mypy                         # 类型检查
 uv run orzmc --help                 # 应用子命令树(无子命令时同样打印帮助)
 uv run orzmc version                # 打印版本(读取库 version.py)
+uv run orzmc update --check         # 检查是否有新版本(只读,--check 不受开发环境护栏限制;真正执行 update 在 venv 内会被拦)
 uv build --all-packages            # 构建 sdist+wheel(库与应用)
 uv publish                         # 发布到 PyPI
 uv run --package orzmc-app python scripts/build.py   # PyInstaller 单文件二进制 → dist/
+uv run python scripts/accept_selfupdate.py           # 安装器 + 自升级本地验收(跨平台,--skip-build 复用 dist/)
+uv run python scripts/accept_selfupdate.py --skip-build --powershell pwsh --expect-ps-major 7   # Windows:再验一遍 PS 7
 uv lock                            # 锁定依赖
 ```
 

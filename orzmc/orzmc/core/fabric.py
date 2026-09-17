@@ -1,4 +1,9 @@
-"""Fabric loader resolution & library download (fabric-meta API)."""
+"""Fabric loader resolution & library download (fabric-meta API).
+
+Every fabric-meta response goes through the shared :class:`MetadataCache`, so
+repeat launches reuse the loader list / profile while it is fresh (24h TTL,
+``--refresh`` bypasses it).
+"""
 
 from __future__ import annotations
 
@@ -6,14 +11,14 @@ from typing import Any
 
 from orzmc.core.profiles import ProfileAddon
 from orzmc.domain.libraries import Library
-from orzmc.infra.http import HttpClient
+from orzmc.infra.cache import MetadataCache
 
 META_BASE = "https://meta.fabricmc.net/v2"
 
 
 class Fabric:
-    def __init__(self, http: HttpClient, version: str, loader: str | None = None) -> None:
-        self._http = http
+    def __init__(self, cache: MetadataCache, version: str, loader: str | None = None) -> None:
+        self._cache = cache
         self.version = version
         self.loader = loader
 
@@ -23,7 +28,11 @@ class Fabric:
         # fabric-meta stopped accepting the installer version in this URL (404
         # for every combo); the loader version alone resolves the profile.
         url = f"{META_BASE}/versions/loader/{self.version}/{loader_version}/profile/json"
-        config: dict[str, Any] = self._http.get_json(url)
+        config: dict[str, Any] = self._cache.get_json(
+            self._cache.meta_path("fabric-profile", self.version, loader_version),
+            url,
+            desc=f"获取 Fabric 配置 ({self.version})",
+        )
 
         libraries: list[Library] = []
         for lib in config.get("libraries", []):
@@ -54,7 +63,11 @@ class Fabric:
 
     def latest_loader_version(self) -> str:
         """Latest stable fabric-loader version for this MC version."""
-        entries = self._http.get_json(f"{META_BASE}/versions/loader/{self.version}")
+        entries = self._cache.get_json(
+            self._cache.meta_path("fabric-loader", self.version),
+            f"{META_BASE}/versions/loader/{self.version}",
+            desc=f"获取 Fabric loader 列表 ({self.version})",
+        )
         for entry in entries:
             loader = (entry or {}).get("loader", {})
             if loader.get("stable"):
@@ -65,7 +78,11 @@ class Fabric:
 
     def latest_installer_version(self) -> str:
         """Latest stable fabric-installer version."""
-        entries = self._http.get_json(f"{META_BASE}/versions/installer")
+        entries = self._cache.get_json(
+            self._cache.meta_path("fabric-installer"),
+            f"{META_BASE}/versions/installer",
+            desc="获取 Fabric 安装器版本",
+        )
         for entry in entries:
             if entry.get("stable"):
                 return entry["version"]

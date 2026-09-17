@@ -178,32 +178,22 @@ jobs:
       - name: Build binary
         run: uv run --package orzmc-app python scripts/build.py
 
-      # Unix: install to a temp dir with XDG_STATE_HOME redirected and rc
-      # untouched; self-uninstall then deletes the binary + manifest.
-      - name: Installer e2e (Unix)
+      # Installer + self-update e2e: one cross-platform harness covers install
+      # --file into an isolated temp dir → update --check → update --file (the
+      # detached helper really swaps the binary) → real release download →
+      # failure path → dev guard → piped entry (irm | iex / curl | sh, served
+      # with GitHub-Pages-like content types) → self-uninstall. PATH / shell rc
+      # / user dirs are never touched.
+      - name: Installer + self-update e2e (Unix)
         if: runner.os != 'Windows'
-        shell: bash
-        env:
-          XDG_STATE_HOME: "${{ runner.temp }}/orzmc-state"
-        run: |
-          set -euxo pipefail
-          sh docs/install.sh --file "$PWD/dist/orzmc" --dir "$RUNNER_TEMP/orzmc-install" --no-modify-rc
-          "$RUNNER_TEMP/orzmc-install/orzmc" version
-          "$RUNNER_TEMP/orzmc-install/orzmc" self-uninstall --yes
-          test ! -e "$RUNNER_TEMP/orzmc-install/orzmc"
-          test ! -e "$XDG_STATE_HOME/orzmc/install.conf"
-
-      # Windows: LOCALAPPDATA redirected + ORZMC_NO_RC=1 keeps the install
-      # fully hermetic; `powershell -File` runs the installer on PS 5.1.
-      - name: Installer e2e (Windows)
+        run: uv run python scripts/accept_selfupdate.py --skip-build
+      # Windows runs it once per PowerShell flavour: 5.1 is the shell users get
+      # by default and the one that byte-decodes an octet-stream .ps1 source
+      # (the installer's encoding self-heal must recover it); 7.x is the modern
+      # shell. Both are asserted, including their PSEdition/version.
+      - name: Installer + self-update e2e (Windows PowerShell 5.1)
         if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          LOCALAPPDATA: "${{ runner.temp }}\\orzmc-state"
-          ORZMC_NO_RC: "1"
-        run: |
-          powershell -NoProfile -File docs/install.ps1 -file "$PWD\dist\orzmc.exe" -dir "$env:RUNNER_TEMP\orzmc-install"
-          & "$env:RUNNER_TEMP\orzmc-install\orzmc.exe" version
-          & "$env:RUNNER_TEMP\orzmc-install\orzmc.exe" self-uninstall --yes
-          if (Test-Path "$env:RUNNER_TEMP\orzmc-install\orzmc.exe") { throw "self-uninstall left the binary" }
-          if (Test-Path "$env:LOCALAPPDATA\orzmc\install.conf") { throw "self-uninstall left the install manifest" }
+        run: uv run python scripts/accept_selfupdate.py --skip-build --powershell powershell --expect-ps-major 5
+      - name: Installer + self-update e2e (PowerShell 7)
+        if: runner.os == 'Windows'
+        run: uv run python scripts/accept_selfupdate.py --skip-build --powershell pwsh --expect-ps-major 7

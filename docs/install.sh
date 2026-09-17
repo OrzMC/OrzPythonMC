@@ -59,6 +59,9 @@ OrzMC 一键安装器(macOS / Linux)
 
 卸载(内置,推荐):
   orzmc self-uninstall [--yes] [--remove-root] [--force]
+
+升级(内置,也可重跑本命令覆盖安装):
+  orzmc update [--check] [-v vX.Y.Z]
 EOF
 }
 
@@ -275,7 +278,7 @@ do_install() {
         echo "未修改 shell 配置;若当前 PATH 不含 $INSTALL_DIR,请手动执行:"
         echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
     fi
-    echo "升级:重新执行本命令即可覆盖安装。"
+    echo "升级:orzmc update(或重新执行本命令覆盖安装)。"
     echo "卸载: orzmc self-uninstall --yes(游戏数据默认保留;--remove-root 连 ~/minecraft 一起删)"
 }
 
