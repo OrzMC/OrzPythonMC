@@ -11,7 +11,7 @@ from orzmc.domain.paths import DEFAULT_ROOT, PathLayout
 from orzmc.domain.types import GameType
 from orzmc.infra.cache import MetadataCache
 from orzmc.infra.fs import FileStore
-from orzmc.infra.http import HttpClient
+from orzmc.infra.http import DEFAULT_POOL_SIZE, HttpClient
 from orzmc.infra.log import NullReporter, Reporter
 from orzmc.infra.progress import NullProgress, ProgressSink
 from orzmc.infra.runner import ProcessRunner
@@ -54,12 +54,16 @@ class Services:
         self.options = options
         self.reporter = reporter or NullReporter()
         self.sink = sink or NullProgress()
-        self.http = http or HttpClient()
+        # keep-alive 池必须 ≥ 下载并发数:否则 urllib3 会丢弃超限连接、每个请求重新
+        # TCP+TLS。默认池已经够 32 并发,用户把并发调得更高时跟着放大。
+        self.http = http or HttpClient(pool_size=max(DEFAULT_POOL_SIZE, options.download_threads))
         self.fs = fs or FileStore()
         self.process = ProcessRunner(self.reporter)
         self.context = AppContext.build(options)
         paths = self.context.paths
-        self.downloader = Downloader(self.http, self.fs, self.reporter, self.sink, paths)
+        self.downloader = Downloader(
+            self.http, self.fs, self.reporter, self.sink, paths, workers=options.download_threads
+        )
         self.java_env = JavaEnv(self.http, self.fs, self.reporter, self.sink, paths)
         # One metadata cache per invocation: it carries the library-wide TTL and
         # the CLI ``--refresh`` flag, so every remote API (Mojang / Fabric /

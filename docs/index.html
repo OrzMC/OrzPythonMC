@@ -321,6 +321,9 @@ orzmc server -v 26.2 -t paper --yes --nogui
 <span class="cm"># 元数据(版本清单 / Fabric / Paper / Forge)默认缓存 24h;--refresh 强制重新拉取</span>
 orzmc client -v 26.2 --refresh
 
+<span class="cm"># 下载并发(小文件多、延迟高 / 走代理时调大明显更快,1-64,默认 16)</span>
+orzmc client -v 26.2 -j 32
+
 <span class="cm"># 升级 orzmc 自身(GitHub 最新发布;--check 只查询,-v 指定版本)</span>
 orzmc update --check
 orzmc update</pre></div>
@@ -369,7 +372,12 @@ orzmc update</pre></div>
         <div class="feat">
           <div class="icon">💾</div>
           <h3>元数据缓存与进度反馈</h3>
-          <p>版本清单 / Fabric / Paper / Forge 元数据统一缓存 24 小时,离线也能启动已装版本;下载与元数据请求都有进度条,慢网不静默;需要最新数据时加 <code>--refresh</code>。</p>
+          <p>版本清单 / Fabric / Paper / Forge 元数据统一缓存 24 小时,离线也能启动已装版本;下载与元数据请求都有进度条(百分比 + 计数),慢网不静默;需要最新数据时加 <code>--refresh</code>。</p>
+        </div>
+        <div class="feat">
+          <div class="icon">⚡</div>
+          <h3>下载并发可调</h3>
+          <p>资源阶段是几千个小文件,耗时由每请求延迟与并发数决定而非带宽。连接池随并发自动放大,延迟高的链路上 <code>-j 32</code> 可成倍提速(实测约 2.2 倍)。</p>
         </div>
         <div class="feat">
           <div class="icon">⬆️</div>

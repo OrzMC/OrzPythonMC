@@ -7,7 +7,7 @@ import sys
 
 from typer.testing import CliRunner
 
-from orzmc import FileStore, UpdateCheck
+from orzmc import DEFAULT_DOWNLOAD_THREADS, MAX_DOWNLOAD_THREADS, FileStore, UpdateCheck
 from orzmc import __version__ as lib_version
 from orzmc_app import __version__
 from orzmc_app.cli import app
@@ -278,6 +278,39 @@ def test_bad_memory_rejected() -> None:
     result = runner.invoke(app, ["client", "--minmem", "huge", "--version", "1.20.4"])
     assert result.exit_code == 1
     assert "无效内存" in result.stdout
+
+
+class TestDownloadThreadsOption:
+    """``-j/--download-threads``:资源阶段是几千个小文件,并发是主要提速手段。"""
+
+    def test_flag_reaches_client_and_server_options(self, monkeypatch) -> None:
+        seen: list[int] = []
+        monkeypatch.setattr(app_module, "resolve_version", lambda version, root_dir=None, refresh=False: version)
+        monkeypatch.setattr(app_module, "resolve_username", lambda username: username or "guest")
+        monkeypatch.setattr(app_module, "launch_client", lambda options, **kw: seen.append(options.download_threads))
+        monkeypatch.setattr(app_module, "deploy_server", lambda options, **kw: seen.append(options.download_threads))
+
+        assert runner.invoke(app, ["client", "-v", "1.20.4", "-j", "32"]).exit_code == 0
+        assert runner.invoke(app, ["server", "-v", "1.20.4", "--download-threads", "24"]).exit_code == 0
+        assert seen == [32, 24]
+
+    def test_default_is_the_shared_constant(self, monkeypatch) -> None:
+        seen: list[int] = []
+        monkeypatch.setattr(app_module, "resolve_version", lambda version, root_dir=None, refresh=False: version)
+        monkeypatch.setattr(app_module, "resolve_username", lambda username: username or "guest")
+        monkeypatch.setattr(app_module, "launch_client", lambda options, **kw: seen.append(options.download_threads))
+        assert runner.invoke(app, ["client", "-v", "1.20.4"]).exit_code == 0
+        assert seen == [DEFAULT_DOWNLOAD_THREADS]
+
+    def test_out_of_range_rejected(self) -> None:
+        for value in ("0", "-1", str(MAX_DOWNLOAD_THREADS + 1)):
+            result = runner.invoke(app, ["client", "-v", "1.20.4", "-j", value])
+            assert result.exit_code == 1, value
+            assert "下载并发数必须在" in result.stdout
+
+    def test_help_documents_the_flag(self) -> None:
+        result = runner.invoke(app, ["client", "--help"])
+        assert "--download-threads" in result.stdout
 
 
 def test_self_uninstall_calls_public_api(monkeypatch) -> None:

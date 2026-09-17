@@ -65,6 +65,27 @@ def _count_column() -> Any:
     return CountColumn()
 
 
+def _percentage_column() -> Any:
+    """Percentage of the current task, blank while the total is unknown.
+
+    ``task.percentage`` is ``0.0`` when there is no total, which would sit at
+    "0.0%" next to a pulsing bar and read as stuck — so hide it, same rule as
+    the count column. For file counts the percentage says more than the raw
+    number ("1234 / 5057" vs "24.4%"), for byte downloads it is the familiar
+    percentage bar. Actual throughput is not shown on purpose: the same task
+    type carries both byte counts and file counts, so a speed column would
+    print nonsense for one of them.
+    """
+    from rich.progress import ProgressColumn
+    from rich.text import Text
+
+    class PercentageColumn(ProgressColumn):
+        def render(self, task: Any) -> Any:
+            return Text("") if task.total is None else Text(f"{task.percentage:3.1f}%")
+
+    return PercentageColumn()
+
+
 class RichProgress(ProgressSink):
     """Renders one rich progress task; reused across a whole operation.
 
@@ -79,6 +100,7 @@ class RichProgress(ProgressSink):
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             _count_column(),
+            _percentage_column(),
             TimeElapsedColumn(),
             SpinnerColumn(),
             console=console,

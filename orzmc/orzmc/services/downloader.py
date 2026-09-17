@@ -9,10 +9,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from orzmc.core.mojang import Mojang
 from orzmc.domain.libraries import Library, resolve_libraries
+from orzmc.domain.options import DEFAULT_DOWNLOAD_THREADS
 from orzmc.domain.paths import PathLayout
 from orzmc.infra.fs import FileStore
 from orzmc.infra.hashing import sha1_file
-from orzmc.infra.http import HttpClient
+from orzmc.infra.http import SMALL_FILE_READ_TIMEOUT, HttpClient
 from orzmc.infra.log import Reporter
 from orzmc.infra.progress import ProgressSink
 from orzmc.infra.transfer import download_with_progress
@@ -30,12 +31,14 @@ class Downloader:
         reporter: Reporter,
         sink: ProgressSink,
         paths: PathLayout,
+        workers: int = DEFAULT_DOWNLOAD_THREADS,
     ) -> None:
         self._http = http
         self._fs = fs
         self._reporter = reporter
         self._sink = sink
         self._paths = paths
+        self._workers = workers
 
     # ── single file ─────────────────────────────────────────────────────────
 
@@ -144,7 +147,7 @@ class Downloader:
             return 0
         self._sink.start(desc, total=len(missing))
         done = 0
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with ThreadPoolExecutor(max_workers=self._workers) as pool:
             futures = {pool.submit(self._download_one, u, d, s): d for u, d, s in missing}
             for future in as_completed(futures):
                 future.result()  # re-raise download failures
@@ -156,7 +159,8 @@ class Downloader:
 
     def _download_one(self, url: str, dest: str, sha1: str | None) -> None:
         self._fs.ensure_dir(os.path.dirname(dest))
-        self._http.download(url, dest)
+        # 小文件专用短读超时:卡住的连接尽快失败重试,而不是让整批并发空等 30s。
+        self._http.download(url, dest, timeout=SMALL_FILE_READ_TIMEOUT)
         if sha1 and sha1_file(dest) != sha1:
             self._fs.remove(dest)
             raise RuntimeError(f"文件校验失败: {url}")

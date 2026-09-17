@@ -13,7 +13,7 @@ from orzmc.core.mojang import VersionEntry
 from orzmc.domain.java import DEFAULT_JAVA_MAJOR, required_java_major
 from orzmc.domain.launch import DEFAULT_MAIN_CLASS, build_launch_command, game_args, jvm_args
 from orzmc.domain.libraries import Library, resolve_libraries
-from orzmc.domain.options import RuntimeOptions
+from orzmc.domain.options import DEFAULT_DOWNLOAD_THREADS, MAX_DOWNLOAD_THREADS, RuntimeOptions
 from orzmc.domain.paths import DEFAULT_ROOT, PathLayout
 from orzmc.domain.types import GameType
 from orzmc.infra.fs import FileStore
@@ -30,9 +30,11 @@ from orzmc.services.versions import InstalledVersion, VersionManager
 from orzmc.version import __version__
 
 __all__ = [
+    "DEFAULT_DOWNLOAD_THREADS",
     "DEFAULT_JAVA_MAJOR",
     "DEFAULT_MAIN_CLASS",
     "DEFAULT_ROOT",
+    "MAX_DOWNLOAD_THREADS",
     "AppContext",
     "Backup",
     "ClientService",

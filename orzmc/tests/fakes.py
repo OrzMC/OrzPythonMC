@@ -8,6 +8,7 @@ them directly. The tests directory is on ``sys.path`` under pytest's default
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, NoReturn
 
@@ -51,6 +52,7 @@ class FakeSink(ProgressSink):
     def __init__(self) -> None:
         self.starts: list[tuple[str, int | None]] = []
         self.advanced = 0
+        self.finishes = 0
 
     def start(self, desc: str, total: int | None = None) -> None:
         self.starts.append((desc, total))
@@ -59,7 +61,7 @@ class FakeSink(ProgressSink):
         self.advanced += n
 
     def finish(self) -> None:
-        pass
+        self.finishes += 1
 
 
 class FakeHttp(HttpClient):
@@ -79,20 +81,30 @@ class FakeHttp(HttpClient):
         self.redirects: dict[str, str] = {}
         self.requests: list[tuple[str, str]] = []
         self.json_calls: list[str] = []
-
-    def content_length(self, url: str) -> int | None:
-        return None
+        # 覆盖某个 URL 上报的 Content-Length(默认就是字节数;置 None 模拟"服务器不给长度")。
+        self.canned_lengths: dict[str, int | None] = {}
+        # 每次 download 的关键字参数(timeout / on_chunk / on_open 是否给了),
+        # 用来断言「小文件用短超时」「进度总量取自响应头而非 HEAD」。
+        self.download_kwargs: list[dict[str, Any]] = []
 
     def head_location(self, url: str) -> str | None:
         """Seeded 302 target for the rate-limit-proof fallback resolver."""
         self.requests.append(("head_location", url))
         return _longest_match(url, self.redirects)
 
-    def get(self, url: str, params=None, headers=None, stream=False) -> NoReturn:
+    def get(self, url: str, params=None, headers=None, stream=False, timeout=None) -> NoReturn:
         raise AssertionError(f"unexpected get: {url}")
 
-    def download(self, url: str, dest_path: str, on_chunk=None) -> int:
+    def download(
+        self,
+        url: str,
+        dest_path: str,
+        on_chunk: Callable[[int], None] | None = None,
+        on_open: Callable[[int | None], None] | None = None,
+        timeout: float | tuple[float, float] | None = None,
+    ) -> int:
         self.requests.append(("download", url))
+        self.download_kwargs.append({"on_chunk": on_chunk, "on_open": on_open, "timeout": timeout})
         data = _longest_match(url, self.canned)
         if data is None:
             if self.canned_archive is None:
@@ -101,6 +113,9 @@ class FakeHttp(HttpClient):
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         with open(dest_path, "wb") as f:
             f.write(data)
+        # 真实客户端从流式 GET 的响应头拿 Content-Length,on_open 在写入前触发。
+        if on_open:
+            on_open(self.canned_lengths.get(url, len(data)))
         if on_chunk:
             on_chunk(len(data))
         return len(data)
