@@ -10,11 +10,15 @@ import io
 import os
 import sys
 import tarfile
+import threading
+import time
 import zipfile
 
 from fakes import FakeHttp, FakeProcess, FakeReporter, FakeSink
 
 from orzmc import (
+    DEFAULT_DOWNLOAD_THREADS,
+    MAX_DOWNLOAD_THREADS,
     ClientService,
     FileStore,
     GameType,
@@ -31,6 +35,7 @@ from orzmc.core.server.base import ServerPrepare
 from orzmc.core.server.paper import PaperAPI
 from orzmc.domain.libraries import os_arch, os_key
 from orzmc.infra.cache import MetadataCache
+from orzmc.infra.http import SMALL_FILE_READ_TIMEOUT
 from orzmc.services.java import JavaEnv
 
 
@@ -265,6 +270,60 @@ class TestDownloader:
         assert services.downloader.download_file("https://x", dest, "x")
         assert not services.downloader.download_file("https://x", dest, "x")  # cached
         assert len(http.requests) == 1
+
+
+class _ConcurrencyProbe(FakeHttp):
+    """记录同时在跑的 download 数:证明并发数真的生效。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._lock = threading.Lock()
+        self.active = 0
+        self.peak = 0
+
+    def download(self, url, dest_path, on_chunk=None, on_open=None, timeout=None) -> int:
+        with self._lock:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+        try:
+            time.sleep(0.05)  # 模拟每个小文件的网络往返
+            return super().download(url, dest_path, on_chunk, on_open, timeout)
+        finally:
+            with self._lock:
+                self.active -= 1
+
+
+class TestDownloadConcurrency:
+    """并发数与 keep-alive 连接池必须匹配(池小于并发 → 每个请求重建 TLS)。"""
+
+    def test_runtime_options_default_comes_from_the_shared_constant(self) -> None:
+        assert RuntimeOptions().download_threads == DEFAULT_DOWNLOAD_THREADS
+
+    def test_configured_threads_reach_the_downloader(self, tmp_path, reporter, sink) -> None:
+        services = _services(tmp_path, reporter, sink, FakeHttp(), download_threads=40)
+        assert services.downloader._workers == 40
+
+    def test_default_http_pool_covers_the_configured_threads(self, tmp_path, reporter, sink) -> None:
+        options = RuntimeOptions(root_dir=str(tmp_path), version="1.20.4", download_threads=MAX_DOWNLOAD_THREADS)
+        services = Services(options, reporter=reporter, sink=sink)
+        assert services.http.pool_size >= MAX_DOWNLOAD_THREADS
+
+    def test_bulk_download_runs_concurrently_within_the_cap(self, tmp_path, reporter, sink) -> None:
+        http = _ConcurrencyProbe()
+        urls = [f"https://assets/{i}" for i in range(8)]
+        http.canned = dict.fromkeys(urls, b"x")
+        services = _services(tmp_path, reporter, sink, http, download_threads=4)
+        items: list[tuple[str, str, str | None]] = [
+            (url, str(tmp_path / f"obj{i}"), None) for i, url in enumerate(urls)
+        ]
+        assert services.downloader._download_missing(items, "批量") == 8
+        assert 2 <= http.peak <= 4  # 真的并行,且不超过配置的并发数
+
+    def test_bulk_download_applies_the_small_file_timeout(self, tmp_path, reporter, sink, http) -> None:
+        http.canned = {"https://assets/a": b"a"}
+        services = _services(tmp_path, reporter, sink, http)
+        services.downloader._download_missing([("https://assets/a", str(tmp_path / "a"), None)], "批量")
+        assert [kw["timeout"] for kw in http.download_kwargs] == [SMALL_FILE_READ_TIMEOUT]
 
 
 class TestServerService:

@@ -18,6 +18,8 @@ from rich.prompt import Confirm
 from rich.table import Table
 
 from orzmc import (
+    DEFAULT_DOWNLOAD_THREADS,
+    MAX_DOWNLOAD_THREADS,
     GameType,
     RuntimeOptions,
     backup_world,
@@ -35,7 +37,18 @@ from orzmc import (
 from orzmc.infra.log import RichReporter
 from orzmc.infra.progress import RichProgress
 from orzmc_app import __version__ as APP_VERSION
-from orzmc_app.cli.options import JvmOpts, MaxMem, MinMem, Refresh, RootDir, Username, Verbose, Version, Yes
+from orzmc_app.cli.options import (
+    DownloadThreads,
+    JvmOpts,
+    MaxMem,
+    MinMem,
+    Refresh,
+    RootDir,
+    Username,
+    Verbose,
+    Version,
+    Yes,
+)
 from orzmc_app.cli.prompts import confirm_eula, confirm_java, is_interactive, resolve_username, resolve_version
 
 _console = Console(highlight=False)
@@ -52,6 +65,13 @@ def _fail(message: str) -> NoReturn:
 def _check_mem(name: str, value: str) -> None:
     if not _MEM_RE.match(value):
         _fail(f"无效内存: {name}={value} (例如 512M、2G)")
+
+
+def _check_threads(value: int) -> int:
+    """Validate the download concurrency; typer only enforces the type."""
+    if not 1 <= value <= MAX_DOWNLOAD_THREADS:
+        _fail(f"下载并发数必须在 1-{MAX_DOWNLOAD_THREADS} 之间(当前 {value})")
+    return value
 
 
 def _parse_type(value: str, *, client: bool) -> GameType:
@@ -88,12 +108,14 @@ def client(
     extract_music: Annotated[bool, typer.Option("--extract-music", help="提取客户端音乐后退出")] = False,
     jvm_opts: JvmOpts = None,
     refresh: Refresh = False,
+    download_threads: DownloadThreads = DEFAULT_DOWNLOAD_THREADS,
     root_dir: RootDir = None,
 ) -> None:
     """运行 Minecraft 客户端(缺失文件自动下载即安装)。"""
     game_type_obj = _parse_type(game_type, client=True)
     _check_mem("min", min_mem)
     _check_mem("max", max_mem)
+    download_threads = _check_threads(download_threads)
     resolved = resolve_version(version, root_dir, refresh=refresh)
     username = resolve_username(username)
     options = RuntimeOptions(
@@ -106,6 +128,7 @@ def client(
         extract_music=extract_music,
         jvm_opts=jvm_opts,
         refresh=refresh,
+        download_threads=download_threads,
         root_dir=root_dir,
     )
     reporter = RichReporter(verbose=bool(ctx.obj.get("verbose")))
@@ -135,12 +158,14 @@ def server(
         bool, typer.Option("--nogui", help="无窗口模式启动(不弹服务端 GUI);终端输入 stop 或 Ctrl-C 关闭")
     ] = False,
     refresh: Refresh = False,
+    download_threads: DownloadThreads = DEFAULT_DOWNLOAD_THREADS,
     root_dir: RootDir = None,
 ) -> None:
     """部署并运行 Minecraft 服务端(缺失文件自动下载即安装)。"""
     game_type_obj = _parse_type(game_type, client=False)
     _check_mem("min", min_mem)
     _check_mem("max", max_mem)
+    download_threads = _check_threads(download_threads)
     resolved = resolve_version(version, root_dir, refresh=refresh)
     options = RuntimeOptions(
         is_client=False,
@@ -156,6 +181,7 @@ def server(
         server_args=server_args,
         nogui=nogui,
         refresh=refresh,
+        download_threads=download_threads,
         root_dir=root_dir,
     )
     reporter = RichReporter(verbose=bool(ctx.obj.get("verbose")))

@@ -106,10 +106,10 @@ orzmc update
 ```
 orzmc [--verbose]                 # 无子命令 → 打印帮助
 orzmc client   [-v VER] [--username|-u USER] [-t vanilla|fabric|forge] [-m MIN] [-x MAX]
-               [--extract-music] [--jvm-opts ...] [--refresh]
+               [--extract-music] [--jvm-opts ...] [--refresh] [-j THREADS]
 orzmc server   [-v VER] [-t vanilla|paper|fabric|forge] [-m MIN] [-x MAX]
                [--force-upgrade] [--symlink] [--force-download] [--yes]
-               [--jvm-opts ...] [--server-args ...] [--nogui] [--refresh]
+               [--jvm-opts ...] [--server-args ...] [--nogui] [--refresh] [-j THREADS]
 orzmc remove   -v VER [--server -t TYPE] [--yes]
 orzmc update   [-v VER] [--check] [--file PATH] [--yes] [--force]
 orzmc self-uninstall [--yes] [--remove-root] [--force]
@@ -123,6 +123,7 @@ orzmc version
 - **版本缺省**:有 TTY 时弹出键盘导航选择器(`↑↓` 选择、`←→` / PgUp / PgDn 翻页、输入即过滤、`t` 切正式 / 测试版、`x` 清空、Enter 选中、Esc 用最新);脚本 / 管道等非 TTY 场景自动用最新 release 与默认值,不阻塞。
 - **玩家名**:`client` 默认 `guest`;TTY 下未指定 `-u/--username` 会交互询问(回车用默认);脚本 / 管道等非 TTY 场景静默用默认。
 - **运行即安装**:`client` / `server` 检测到文件缺失会自动下载补齐,并显示下载进度(元数据请求也有进度条,慢网不会静默等待)。
+- **下载并发**:`-j/--download-threads`(1-64,默认 16)。资源阶段是几千个几十 KB 的小文件,耗时几乎完全由**每请求延迟 乘 并发数**决定而不是带宽:在延迟高 / 走代理的链路上把它调大(如 `-j 32`)能成倍提速(实测 8→32 线程约 2.2 倍);连接池会跟着并发自动放大,不会因池太小而反复重建 TLS。
 - **元数据缓存**:版本清单、Fabric 元数据、Paper 构建、Forge promotions 统一缓存 **24 小时**,期间直接复用缓存(离线也能启动已装版本);加 `--refresh` 强制重新拉取。
 - **自升级**:`orzmc update` 升级工具自身二进制(`--check` 只查询,`-v/--version` 指定版本或绕过 GitHub API 限流,`--file` 离线/本地安装)。为保证正在运行的程序不被弄坏,替换由分离助手在命令退出后完成——**下一次运行才是新版本**;pip/pipx 托管安装会被拒绝并提示用 `pip install -U orzmc-app`。
 - **服务端关闭**:终端输入 `stop` 保存退出,或按 **Ctrl-C**(等待保存退出,超 60s 才强制结束,不留孤儿进程)。

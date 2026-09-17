@@ -180,7 +180,8 @@ class TestCacheProgress:
             paths.version_jsons_dir(),
         )
         mojang.version_json("1.20.4")
-        assert ("下载版本元数据 1.20.4", None) in sink.starts
+        # 总量取自流式 GET 的响应头(FakeHttp 上报字节数),不再先发一次 HEAD 探测。
+        assert ("下载版本元数据 1.20.4", 37) in sink.starts
         assert sink.advanced > 0
 
 

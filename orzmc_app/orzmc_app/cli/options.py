@@ -6,6 +6,8 @@ from typing import Annotated
 
 import typer
 
+from orzmc import DEFAULT_DOWNLOAD_THREADS, MAX_DOWNLOAD_THREADS
+
 # ── generic ──────────────────────────────────────────────────────────────────
 
 
@@ -29,6 +31,17 @@ Username = Annotated[str | None, typer.Option("--username", "-u", help=_username
 Refresh = Annotated[
     bool,
     typer.Option("--refresh", help="忽略元数据缓存(默认 24 小时内复用),强制重新拉取版本清单与类型元数据"),
+]
+DownloadThreads = Annotated[
+    int,
+    typer.Option(
+        "--download-threads",
+        "-j",
+        help=(
+            f"下载并发数(1-{MAX_DOWNLOAD_THREADS},默认 {DEFAULT_DOWNLOAD_THREADS})。"
+            "资源阶段是几千个小文件,延迟高/代理链路上调大明显更快"
+        ),
+    ),
 ]
 MinMem = Annotated[str, typer.Option("--minmem", "-m", help="最小内存(如 512M)")]
 MaxMem = Annotated[str, typer.Option("--maxmem", "-x", help="最大内存(如 2G)")]
