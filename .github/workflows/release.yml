@@ -53,6 +53,8 @@ jobs:
           fi
           echo "ok: $TAG == v$version"
       - name: Tag commit is on main
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
