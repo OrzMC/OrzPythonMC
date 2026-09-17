@@ -89,7 +89,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: acceptance-logs-${{ runner.os }}-${{ runner.arch }}
+          name: acceptance-logs-primary-${{ runner.os }}-${{ runner.arch }}
           path: ${{ runner.temp }}/orzmc-accept/logs
           if-no-files-found: warn
 
@@ -138,6 +138,43 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: acceptance-logs-${{ runner.os }}-${{ runner.arch }}
+          name: acceptance-logs-backcompat-${{ runner.os }}-${{ runner.arch }}
           path: ${{ runner.temp }}/orzmc-backcompat/logs
           if-no-files-found: warn
+
+  # 夜间验收失败没人会收到通知(GitHub 不主动通知 schedule 失败,仓库 60 天无
+  # 活动后 cron 还会静默停) → 自动开一个 issue,已有同名 issue 就追加评论。
+  notify:
+    needs: [primary, backcompat]
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v8
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const title = '真实验收失败(acceptance)';
+            const body = [
+              `工作流 ${context.workflow} 失败:${process.env.RUN_URL}`,
+              `job 结果(primary, backcompat):${process.env.RESULTS}`,
+              '',
+              '判定语义:PASS 通过;UP(no Done) 世界生成卡死、SKIP 类型未适配该版本、',
+              'UP(gap) 上游缺该平台产物 —— 以上均只是警告;只有 FAIL / TIMEOUT 判失败。',
+              '定位:该 run 的 `acceptance-logs-*` artifact 与各 job 日志。',
+            ].join('\n');
+            const { data: issues } = await github.rest.issues.listForRepo({
+              ...context.repo, state: 'open', per_page: 100,
+            });
+            const existing = issues.find((issue) => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: existing.number, body,
+              });
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body });
+            }

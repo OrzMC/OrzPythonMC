@@ -4,11 +4,25 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 合前重验收的正规入口:不跑本工作流的源分支上,也能随时把「6 平台二进制 +
+  # 安装器 e2e」跑一遍(以前只能临时把分支加进 push.branches,那种改触发条件的
+  # 做法容易误合进 main)。
+  #   gh workflow run ci.yml --ref <branch> -f full=true
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 追加 push-only 的重活(binary + installer 6 平台矩阵)
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       # Release reuses this workflow as its quality gate; the 6-platform test
       # matrix already ran on main, so the tag only needs the single-runner checks.
       skip-test-matrix:
+        type: boolean
+        required: false
+        default: false
+      full:
         type: boolean
         required: false
         default: false
@@ -82,10 +96,11 @@ jobs:
 
   # PyInstaller packaging is OS/arch-specific — verify a build works on all 6
   # platforms after every merge to main (not per-PR: keeps PR CI fast). The
-  # branch check keeps this from running on release tag pushes.
+  # branch check keeps this from running on release tag pushes; `full=true`
+  # (workflow_dispatch / workflow_call) opts in on demand.
   binary:
     needs: quality
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')) || inputs.full == true }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -145,7 +160,7 @@ jobs:
   # local build (the "chicken-and-egg" seam) rather than pulling a release.
   installer:
     needs: quality
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')) || inputs.full == true }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

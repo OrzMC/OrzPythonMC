@@ -7,15 +7,77 @@ on:
 permissions:
   contents: write
 
+# 同一时间只允许一个发版流程碰同一个 tag(矩阵 job 之间共享 draft release)。
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  # 发版第一道护栏:tag 必须与代码里的版本一致,且指向 main 上的提交。
+  # 不一致的代价极高:客户端自升级用 `releases/latest` 的 tag 和二进制内嵌
+  # `__version__` 比较,版本对不上会变成「下载→替换→重启后版本没变→再提示升级」
+  # 的死循环;PyPI 元数据、官网 latest 卡片、安装记录都会跟着错。
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # 需要完整历史做 merge-base(判断 tag 是否落在 main 上)。
+          fetch-depth: 0
+      - name: Tag matches the version in orzmc/version.py
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' orzmc/orzmc/version.py)"
+          if [ -z "$version" ]; then
+            echo "::error::cannot read __version__ from orzmc/orzmc/version.py"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match v$version (orzmc/version.py). Bump the version first, then tag."
+            exit 1
+          fi
+          echo "ok: $GITHUB_REF_NAME == v$version"
+      - name: Tag commit is on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag $GITHUB_REF_NAME points at a commit that is not on main — release from main only."
+            exit 1
+          fi
+          echo "ok: $GITHUB_SHA is on main"
+
   quality:
+    needs: verify
     uses: ./.github/workflows/ci.yml
     with:
       # 6 平台 pytest 在 main push 已跑过;发版只取单 runner 质量门禁。
       skip-test-matrix: true
 
-  binary:
+  # 先确保 Release 存在(draft),再挂二进制:
+  #  - release-please 开的 release 已经带整理好的 notes 且已发布 → 原样不动;
+  #  - 手动打 tag 时这里用 GitHub 生成的 notes 建 draft,发布前对用户不可见。
+  prepare:
     needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Ensure a draft release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists — leaving its notes and draft state untouched"
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --generate-notes --title "$GITHUB_REF_NAME"
+          fi
+
+  binary:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -65,17 +127,16 @@ jobs:
             echo "::error::Binary links Python.framework (framework-mode PyInstaller, ~14s startup). Check pyproject.toml [tool.uv] python-preference = \"only-managed\"."
             exit 1
           fi
-      - name: Upload binary
+      - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: dist/orzmc*
           if-no-files-found: error
       - name: Attach to GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: dist/orzmc*
-          fail_on_unmatched_files: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/orzmc* --clobber
 
   pypi:
     needs: quality
@@ -103,3 +164,22 @@ jobs:
         run: uv publish dist/orzmc_app-*
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN_ORZMC_APP }}
+
+  # 收尾:二进制 + PyPI 全部落地后才让 Release 可见。
+  # 半成品(有二进制、没 PyPI 包)不会出现在 releases/latest 上,官网与一键安装
+  # 也不会提前把新版本推给用户。release-please 已发布的 release 上这是 no-op。
+  publish:
+    needs: [binary, pypi]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+          gh release view "$GITHUB_REF_NAME" --json tagName,isDraft,url \
+            --jq '"published \(.tagName) draft=\(.isDraft) \(.url)"'

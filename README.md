@@ -154,11 +154,16 @@ uv build --all-packages       # 构建两个包
 
 ## 自动化验收与 CI
 
-跨平台由三个 GitHub Actions 工作流保证(**6 平台** = macOS / Linux / Windows × x86_64 / arm64):
+跨平台由四个 GitHub Actions 工作流保证(**6 平台** = macOS / Linux / Windows × x86_64 / arm64):
 
-- **`ci.yml`**(push / PR):质量门禁 + 6 平台 pytest + 合并后 6 平台二进制构建
-- **`acceptance.yml`**(每日 + 手动):真实下载 Minecraft / Java 并启动,以最新版为主基准,`backcompat` 冒烟旧版本
-- **`release.yml`**(打 `v*` 标签):6 平台二进制挂 Release + `orzmc` / `orzmc-app` 双包发布 PyPI
+- **`ci.yml`**(push / PR):质量门禁 + 6 平台 pytest + 合并后 6 平台二进制构建与安装器 e2e。
+  想在**合并前**跑重活(二进制 + 安装器),用正规入口,不必改工作流:
+  `gh workflow run ci.yml --ref <分支> -f full=true`
+- **`acceptance.yml`**(每日 + 手动):真实下载 Minecraft / Java 并启动,以最新版为主基准,`backcompat` 冒烟旧版本;失败会自动开 issue
+- **`release-please.yml`**(push main):按 Conventional Commits 自动开 release PR(版本号 + `CHANGELOG.md`),合并即发版
+- **`release.yml`**(打 `v*` 标签):先校验 tag 与代码版本一致,再 6 平台二进制挂 Release、`orzmc` / `orzmc-app` 双包发布 PyPI,最后才让 Release 可见
+
+发版与协作细则见 [`CONTRIBUTING.md`](CONTRIBUTING.md),架构红线见 [`AGENTS.md`](AGENTS.md)。
 
 本地跑真实验收:
 
