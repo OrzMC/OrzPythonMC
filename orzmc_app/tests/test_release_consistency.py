@@ -86,9 +86,29 @@ def test_pages_deploy_injects_the_latest_tag() -> None:
 @needs_checkout
 def test_release_guardrails_are_present() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    assert "GITHUB_REF_NAME" in workflow and "orzmc/version.py" in workflow  # tag == 代码版本
+    # tag == 代码版本(手动 dispatch 与 tag push 走同一段判断,统一用 $TAG)
+    assert "orzmc/version.py" in workflow
+    assert 'if [ "$TAG" != "v$version" ]; then' in workflow
     assert "merge-base --is-ancestor" in workflow  # tag 在 main 上
     assert "--draft=false" in workflow  # 全部成功后才可见
+
+
+@needs_checkout
+def test_release_please_hands_off_to_the_release_pipeline() -> None:
+    """GITHUB_TOKEN 建的 tag 不触发工作流 → release-please 必须显式接力 dispatch。
+
+    这条一旦丢掉,发版会静默停摆:tag 与 Release 都在,却没有二进制、没发 PyPI。
+    """
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    please = (ROOT / ".github" / "workflows" / "release-please.yml").read_text(encoding="utf-8")
+    assert "workflow_dispatch" in release and "tag:" in release
+    assert 'gh workflow run release.yml --ref "$GITHUB_DEFAULT_BRANCH" -f tag="$tag"' in please
+    assert "actions: write" in please
+    # release 可见性交给 release.yml 的收尾(publish),所以由 release-please 建 draft。
+    config = json.loads((ROOT / "release-please-config.json").read_text(encoding="utf-8"))
+    assert config["draft"] is True
+    # 官网"最新版"是部署期注入的,发布完还要显式重部署 Pages。
+    assert "gh workflow run pages.yml" in release
 
 
 @needs_checkout

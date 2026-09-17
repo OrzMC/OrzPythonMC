@@ -3,13 +3,24 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # release-please 用 GITHUB_TOKEN 建的 tag **不会触发工作流**(GitHub 的递归保护:
+  # 由 GITHUB_TOKEN 产生的事件不再触发新的工作流运行),所以它建完 tag 后必须显式
+  # dispatch 本工作流(见 release-please.yml)。手动补发也用同一个入口:
+  #   gh workflow run release.yml --ref main -f tag=vX.Y.Z
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 要发布/补发的 tag(如 v2.1.0)
+        required: true
+        type: string
 
 permissions:
   contents: write
+  actions: write # 收尾时 dispatch pages.yml(同样是 GITHUB_TOKEN 不触发事件的问题)
 
 # 同一时间只允许一个发版流程碰同一个 tag(矩阵 job 之间共享 draft release)。
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -25,7 +36,10 @@ jobs:
         with:
           # 需要完整历史做 merge-base(判断 tag 是否落在 main 上)。
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
       - name: Tag matches the version in orzmc/version.py
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           version="$(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' orzmc/orzmc/version.py)"
@@ -33,17 +47,17 @@ jobs:
             echo "::error::cannot read __version__ from orzmc/orzmc/version.py"
             exit 1
           fi
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match v$version (orzmc/version.py). Bump the version first, then tag."
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match v$version (orzmc/version.py). Bump the version first, then tag."
             exit 1
           fi
-          echo "ok: $GITHUB_REF_NAME == v$version"
+          echo "ok: $TAG == v$version"
       - name: Tag commit is on main
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::tag $GITHUB_REF_NAME points at a commit that is not on main — release from main only."
+            echo "::error::tag $TAG points at a commit that is not on main — release from main only."
             exit 1
           fi
           echo "ok: $GITHUB_SHA is on main"
@@ -68,12 +82,13 @@ jobs:
       - name: Ensure a draft release exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "release $GITHUB_REF_NAME already exists — leaving its notes and draft state untouched"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists — leaving its notes and draft state untouched"
           else
-            gh release create "$GITHUB_REF_NAME" --draft --generate-notes --title "$GITHUB_REF_NAME"
+            gh release create "$TAG" --draft --generate-notes --title "$TAG"
           fi
 
   binary:
@@ -136,7 +151,8 @@ jobs:
       - name: Attach to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/orzmc* --clobber
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release upload "$TAG" dist/orzmc* --clobber
 
   pypi:
     needs: quality
@@ -178,8 +194,15 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          gh release edit "$GITHUB_REF_NAME" --draft=false
-          gh release view "$GITHUB_REF_NAME" --json tagName,isDraft,url \
+          gh release edit "$TAG" --draft=false
+          gh release view "$TAG" --json tagName,isDraft,url \
             --jq '"published \(.tagName) draft=\(.isDraft) \(.url)"'
+      # 官网的"最新版"是部署期注入的,而 release: published 事件同样不会因为
+      # GITHUB_TOKEN 而触发工作流 → 显式重新部署一次。
+      - name: Redeploy the site so it advertises the new version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run pages.yml --ref "$GITHUB_DEFAULT_BRANCH"

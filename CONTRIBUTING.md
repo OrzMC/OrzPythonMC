@@ -53,9 +53,15 @@ gh run watch                                             # 跟进结果
    - `binary`:6 平台 PyInstaller 产物挂到 Release;
    - `pypi`:两个包分别用各自 scope 的 token 发布到 PyPI;
    - `publish`:全部成功后才把 Release 从 draft 变可见 —— 半成品(有二进制、没 PyPI 包)不会出现在 `releases/latest`,官网与一键安装也不会提前推新版本。
-4. 官网(`pages.yml`)会自动把「最新版」指向新版本。
+4. 官网(`pages.yml`)把「最新版」指向新版本 —— 注意这一步是 `release.yml` **显式 dispatch** 的:GITHUB_TOKEN 产生的 tag/release 事件不会触发工作流,所以整条链路都靠显式接力(见 `AGENTS.md`)。
 
-紧急情况下手动打 tag 也可以:`git tag vX.Y.Z && git push origin vX.Y.Z` —— `verify` 会挡住版本不一致,Release 会自动以 draft 建好并在二进制 + PyPI 都成功后发布。
+紧急情况下有两种手动路径:`git tag vX.Y.Z && git push origin vX.Y.Z`(tag push 会正常触发流水线),或补发一次已有 tag:
+
+```bash
+gh workflow run release.yml --ref main -f tag=vX.Y.Z
+```
+
+两条路都走同一套护栏(`verify`:tag == 代码版本、tag 在 main 上)与原子发布(draft → 二进制 → PyPI → 可见)。
 
 ### 版本策略:预稳定期破坏性变更暂走 minor
 

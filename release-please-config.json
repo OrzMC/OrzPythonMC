@@ -7,9 +7,16 @@
       "package-name": "orzmc",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        { "type": "generic", "path": "orzmc/version.py" },
-        { "type": "generic", "path": "orzmc_app/orzmc_app/__init__.py" }
+        {
+          "type": "generic",
+          "path": "orzmc/version.py"
+        },
+        {
+          "type": "generic",
+          "path": "orzmc_app/orzmc_app/__init__.py"
+        }
       ]
     }
-  }
+  },
+  "draft": true
 }

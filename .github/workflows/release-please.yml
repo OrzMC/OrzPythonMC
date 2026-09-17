@@ -10,6 +10,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write # 接力 dispatch release.yml(GITHUB_TOKEN 建的 tag 不会触发工作流)
 
 concurrency:
   group: release-please-${{ github.ref }}
@@ -28,3 +29,26 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+      # 关键:GITHUB_TOKEN 建的 tag/release **不会触发新的工作流运行**(GitHub 的
+      # 递归保护),所以 release.yml 的 `push: tags` 永远不会自己响 —— 必须显式接力。
+      # 判据用「manifest 里的版本对应的 release 是否已有产物」而不是 action 的
+      # outputs:manifest 模式下的 output 名带包路径前缀(`.--release_created`),
+      # 而按现状推断是幂等且自愈的(产物缺失就补跑,已存在就什么都不做)。
+      - name: Kick off the release pipeline when the tag has no binaries yet
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(python3 -c "import json; print(json.load(open('.release-please-manifest.json'))['.'])")"
+          tag="v${version}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "no GitHub release for ${tag} yet — nothing to release"
+            exit 0
+          fi
+          if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx 'orzmc-linux-x86_64'; then
+            echo "${tag} already carries binaries — nothing to do"
+            exit 0
+          fi
+          echo "tag ${tag} exists without binaries — dispatching the release pipeline"
+          gh workflow run release.yml --ref "$GITHUB_DEFAULT_BRANCH" -f tag="$tag"
+

@@ -195,9 +195,11 @@ uv lock                            # 锁定依赖
 
 ## 发布
 
+- **GITHUB_TOKEN 建的事件不会触发新工作流**(GitHub 的递归保护),这是本流程最容易踩的坑:release-please 用 `GITHUB_TOKEN` 建出的 tag **不会**触发 `release.yml` 的 `push: tags`,结果是「tag 与 Release 都在、但没有二进制、没发 PyPI」。因此 release-please 工作流在检测到「manifest 版本的 release 还没有产物」时**显式** `gh workflow run release.yml --ref main -f tag=vX.Y.Z` 接力(判据幂等:已有 `orzmc-linux-x86_64` 就什么都不做),`release.yml` 收尾发布后再 `gh workflow run pages.yml` 重新部署官网(官网"最新版"是部署期注入的)。两处都需要 `actions: write`。手动补发用同一入口;配了 `RELEASE_PLEASE_TOKEN`(细粒度 PAT)时 tag push 会自己触发,接力代码保留也无害(幂等)。
+- `release-please-config.json` 里 `"draft": true`:Release 由 release-please 建为 **draft**,可见性交给 `release.yml` 的 `publish` 收尾(二进制 + PyPI 全部落地后才 `--draft=false`),避免"有 Release、没资产"的窗口期被 `releases/latest` 与官网看到。
 - **人按按钮 = 合并 release PR**:`release-please.yml`(push main)让机器人维护 release PR(bump 两处版本 + 写 `CHANGELOG.md` + 更新 manifest);合并它 → 自动打 `vX.Y.Z` tag + 建带 notes 的 GitHub Release → 触发 `release.yml`。紧急时手动 `git tag vX.Y.Z && git push origin vX.Y.Z` 也走同一条流水线。
 - `release.yml` 的 `verify` job 是**发版第一道护栏**:tag 必须等于 `orzmc/version.py` 的版本、且 tag 提交在 `main` 上。不一致会造成客户端自升级死循环(下载→替换→重启后版本没变→再提示升级)与错误的 PyPI 元数据。
-- **原子发布**:`prepare` 先确保 Release 存在(手动 tag 路径下用 `--generate-notes` 建 **draft**;release-please 已建好的原样不动)→ `binary` 用 `gh release upload --clobber` 挂 6 平台产物(不再用 softprops 之类会改写 notes/draft 状态的动作)→ `pypi` 双包发布 → `publish` 最后 `gh release edit --draft=false`。半成品(有二进制、没 PyPI 包)不会出现在 `releases/latest`,官网与一键安装不会提前推新版本。
+- **原子发布**:`prepare` 先确保 Release 存在(手动 tag / 手动 dispatch 路径下用 `--generate-notes` 建 **draft**;release-please 已建好的原样不动)→ `binary` 用 `gh release upload --clobber` 挂 6 平台产物(不再用 softprops 之类会改写 notes/draft 状态的动作)→ `pypi` 双包发布 → `publish` 最后 `gh release edit --draft=false` 并触发官网重新部署。半成品(有二进制、没 PyPI 包)不会出现在 `releases/latest`,官网与一键安装不会提前推新版本。
 - 双通道:**GitHub Release**(各平台 PyInstaller 二进制,见 `release.yml`)+ **PyPI**(`orzmc` 与 `orzmc-app` 双包)。
 - PyPI 用**按包 scope 的 API token**(repo secret:`PYPI_API_TOKEN_ORZMC_LIB`→`orzmc`、`PYPI_API_TOKEN_ORZMC_APP`→`orzmc_app`);`release.yml` 的 `pypi` job 拆两步各自 `uv publish dist/<包>-*`(glob `orzmc-*` 不误匹配 `orzmc_app-*`,下划线分隔)。
 - 版本号唯一源:`orzmc/version.py` 的 `__version__`。发版前提升它,并同步 **`orzmc_app/orzmc_app/__init__.py`** 的 `__version__`(应用版本的第二处、也是最后一处副本);两个 pyproject 都是 `dynamic = ["version"]` + `[tool.hatch.version] path`,分别从上面两个文件读取,`pyproject.toml` 里**不再**写死版本号(曾漏改过)。`orzmc_app/tests/test_cli.py::test_app_and_library_versions_match` 断言两者一致,漏改会红。
