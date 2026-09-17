@@ -4,9 +4,9 @@
 #   irm https://orzmc.github.io/OrzPythonMC/install.ps1 | iex
 # 指定版本(绕过 GitHub API 限流):
 #   $code = (irm https://orzmc.github.io/OrzPythonMC/install.ps1)
-#   & ([scriptblock]::Create($code)) -version v2.0.1
+#   & ([scriptblock]::Create($code)) -version vX.Y.Z
 # 或下载到本地后直接执行:
-#   powershell -ExecutionPolicy Bypass -File install.ps1 -version v2.0.1
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -version vX.Y.Z
 # 其它选项:-dir <path> / -no-modify-rc / -file <path>(本地安装,测试接缝)/ -uninstall / -help。
 #
 # 设计约束:
@@ -91,7 +91,7 @@ OrzMC 一键安装器(Windows / PowerShell 5.1+)
   irm https://orzmc.github.io/OrzPythonMC/install.ps1 | iex
   powershell -ExecutionPolicy Bypass -File install.ps1
   # 指定版本(绕过 GitHub API 限流):
-  powershell -ExecutionPolicy Bypass -File install.ps1 -version v2.0.1
+  powershell -ExecutionPolicy Bypass -File install.ps1 -version vX.Y.Z
 
 选项:
   -version vX.Y.Z   安装指定版本(绕过 GitHub API 限流)
@@ -364,7 +364,7 @@ try {
             '^-no-modify-rc$|^--no-modify-rc$' { $script:NoRc = $true }
             '^-version$|^--version$' {
                 $i++
-                if ($i -ge $script:ArgList.Count) { die '-version 需要一个参数(如 -version v2.0.1)' }
+                if ($i -ge $script:ArgList.Count) { die '-version 需要一个参数(如 -version vX.Y.Z)' }
                 $script:Version = [string]$script:ArgList[$i]
             }
             '^-version=.*' { $script:Version = $a.Substring(9) }

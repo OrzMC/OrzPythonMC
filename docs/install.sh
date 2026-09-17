@@ -4,7 +4,7 @@
 # 用法(主推,一条命令):
 #   curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh
 # 指定版本(绕过 GitHub API 限流):
-#   curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh -s -- --version v2.0.1
+#   curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh -s -- --version vX.Y.Z
 # 其它选项:--dir <path> / --no-modify-rc / --file <path>(本地安装,测试接缝)/ --uninstall。
 #
 # 约束:macOS /bin/sh 是 bash 3.2 的 POSIX 模式,Linux /bin/sh 是 dash——
@@ -46,7 +46,7 @@ OrzMC 一键安装器(macOS / Linux)
 
 用法:
   curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh
-  curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh -s -- --version v2.0.1
+  curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh -s -- --version vX.Y.Z
 
 选项:
   --version vX.Y.Z   安装指定版本(绕过 GitHub API 限流)
@@ -75,7 +75,7 @@ while [ "$#" -gt 0 ]; do
         --uninstall) MODE="uninstall" ;;
         --no-modify-rc) NO_RC=1 ;;
         --version)
-            [ "$#" -ge 2 ] || die "--version 需要一个参数(如 --version v2.0.1)"
+            [ "$#" -ge 2 ] || die "--version 需要一个参数(如 --version vX.Y.Z)"
             VERSION="$2"
             shift
             ;;
@@ -249,7 +249,7 @@ write_manifest() {
     if [ -n "$FILE" ]; then
         RECORD_VERSION="local-build"
     else
-        # 从 URL 提取 tag(如 v2.0.1),保证 version 字段有值
+        # 从 URL 提取 tag(如 vX.Y.Z),保证 version 字段有值
         RECORD_VERSION="$(printf '%s\n' "$URL" | sed -n 's#.*/releases/download/\([^/]*\)/.*#\1#p')"
         [ -n "$RECORD_VERSION" ] || RECORD_VERSION="$VERSION"
     fi
