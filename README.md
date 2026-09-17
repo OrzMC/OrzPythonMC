@@ -49,6 +49,7 @@ orzmc update --file ./orzmc -v v2.1.0   # 离线用本地二进制升级
 ```
 
 - 为保证正在运行的程序不被弄坏,二进制替换由**分离助手在命令退出后**完成——提示「本命令退出后生效」,**下一次运行才是新版本**。
+- 无参数查询走 GitHub Releases API 的未认证额度(60 次/时/IP);设有 `GITHUB_TOKEN` / `GH_TOKEN` 时自动带上(5000 次/时),限流或离线时用 `-v vX.Y.Z` 指定版本即可完全绕过 API。
 - pip / pipx 安装会被拒绝并提示用 `pip install -U orzmc-app` / `pipx upgrade orzmc-app`。
 - 直接重跑一键安装器同样会覆盖升级,效果相同。
 

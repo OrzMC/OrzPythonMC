@@ -82,6 +82,21 @@ def applier_command(staged: str, binary: str, pid: int) -> list[str]:
     return ["/bin/sh", "-c", script, "orzmc-update", str(pid), staged, binary]
 
 
+def api_headers() -> dict[str, str]:
+    """Headers for the Releases API, honouring a token when the user has one.
+
+    Unauthenticated calls are limited to 60/hour/IP, which CI, corporate NATs
+    and repeated ``--check`` runs can exhaust; ``GITHUB_TOKEN`` / ``GH_TOKEN``
+    raises that to 5000/hour. Never required — the ``--version`` fallback works
+    offline and without credentials.
+    """
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    headers = {"User-Agent": USER_AGENT}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def _ps_quote(value: str) -> str:
     """Escape a path for a single-quoted PowerShell literal."""
     return value.replace("'", "''")
@@ -216,7 +231,7 @@ class SelfUpdater:
 
     def _latest_tag(self) -> str:
         try:
-            data = self._http.get_json(API_LATEST, headers={"User-Agent": USER_AGENT})
+            data = self._http.get_json(API_LATEST, headers=api_headers())
         except Exception as exc:
             raise RuntimeError(
                 "无法获取最新版本信息(网络问题或 GitHub API 限流)。请指定版本重试:orzmc update --version vX.Y.Z"

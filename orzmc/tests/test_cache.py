@@ -129,7 +129,25 @@ class TestCachePolicy:
         cache = _cache(tmp_path, FakeHttp())
         path = cache.meta_path("fabric-profile", "1.20.4/../evil")
         assert path.startswith(os.path.join(str(tmp_path), "cache", "meta"))
-        assert path.endswith("fabric-profile/1.20.4_.._evil.json")
+        # platform-neutral: no separators survive inside a part, no traversal
+        assert os.path.basename(path) == "1.20.4_.._evil.json"
+        assert os.path.basename(os.path.dirname(path)) == "fabric-profile"
+
+    def test_small_future_mtime_still_counts_as_fresh(self, tmp_path) -> None:
+        # Windows: file time can look a few ms future-dated vs time.time()
+        http = FakeHttp()  # no responses: a refetch would fail the test
+        cache = _cache(tmp_path, http, now=lambda: time.time() - 0.5)
+        cache.write(cache.meta_path("paper-project"), {"cached": True})
+        assert cache.get_json(cache.meta_path("paper-project"), "https://fill/paper") == {"cached": True}
+        assert http.json_calls == []
+
+    def test_wildly_future_mtime_is_treated_as_stale(self, tmp_path) -> None:
+        # a clock jump forward must not freeze the cache for good
+        http = FakeHttp()
+        http.json_responses = {"https://fill/paper": {"fresh": True}}
+        cache = _cache(tmp_path, http, now=lambda: time.time() - 3600)
+        cache.write(cache.meta_path("paper-project"), {"cached": True})
+        assert cache.get_json(cache.meta_path("paper-project"), "https://fill/paper") == {"fresh": True}
 
 
 class TestCacheProgress:

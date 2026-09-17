@@ -63,6 +63,14 @@ from pathlib import Path
 from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent.parent
+REPO = "OrzMC/OrzPythonMC"
+RELEASES_LATEST = f"https://github.com/{REPO}/releases/latest"
+USER_AGENT = "orzmc-acceptance"
+# Every PowerShell child must emit UTF-8 (its default is the console code page,
+# which mangles Chinese into "?" before we can assert on it) and must fail the
+# process on an uncaught throw — like `-File` does.
+PS_UTF8 = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $OutputEncoding = [Text.Encoding]::UTF8;"
+PS_WRAP = "{preamble} try {{ {body} }} catch {{ Write-Error $_; exit 1 }}"
 IS_WINDOWS = os.name == "nt"
 BINARY_NAME = "orzmc.exe" if IS_WINDOWS else "orzmc"
 BUILT_BINARY = ROOT / "dist" / BINARY_NAME
@@ -71,6 +79,13 @@ SWAP_TIMEOUT = 30.0  # seconds to wait for the detached helper to rename
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _checks: list[tuple[str, bool, str]] = []
 _verbose = False
+
+
+def force_utf8_stdio() -> None:
+    """Windows consoles default to cp1252; every message here is Chinese."""
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 def say(message: str) -> None:
@@ -100,10 +115,29 @@ def run(args: list[str], env: dict[str, str] | None = None) -> subprocess.Comple
         cwd=str(ROOT),
         env=merged,
         text=True,
+        encoding="utf-8",
         errors="replace",
         capture_output=True,
         check=False,
     )
+
+
+def ps_command(powershell: str, body: str) -> list[str]:
+    """``<ps> -Command`` with UTF-8 output and a non-zero exit on any throw."""
+    return [powershell, "-NoProfile", "-NonInteractive", "-Command", PS_WRAP.format(preamble=PS_UTF8, body=body)]
+
+
+def latest_release_tag() -> str:
+    """Newest release tag via the public redirect — no API, so no rate limit."""
+    import urllib.request
+
+    request = urllib.request.Request(RELEASES_LATEST, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            final = response.geturl()
+    except Exception:
+        return ""
+    return final.rstrip("/").rsplit("/", 1)[-1] if "/tag/" in final else ""
 
 
 def sha256(path: Path) -> str:
@@ -192,19 +226,9 @@ class Sandbox:
     def install_local(self, powershell: str) -> subprocess.CompletedProcess[str]:
         """Install the freshly built binary through the real one-line installer."""
         if IS_WINDOWS:
-            return run(
-                [
-                    powershell,
-                    "-NoProfile",
-                    "-File",
-                    str(ROOT / "docs" / "install.ps1"),
-                    "-file",
-                    str(BUILT_BINARY),
-                    "-dir",
-                    str(self.install_dir),
-                ],
-                env=self.env(),
-            )
+            script = ROOT / "docs" / "install.ps1"
+            body = f"& '{script}' -file '{BUILT_BINARY}' -dir '{self.install_dir}'"
+            return run(ps_command(powershell, body), env=self.env())
         return run(
             [
                 "sh",
@@ -278,13 +302,7 @@ def step_shell_info(sandbox: Sandbox, powershell: str, expect_major: int | None)
         return
     say(f"== 2) PowerShell 运行时({powershell}) ==")
     result = run(
-        [
-            powershell,
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$PSVersionTable.PSVersion.ToString() + '|' + $PSVersionTable.PSEdition",
-        ],
+        ps_command(powershell, "$PSVersionTable.PSVersion.ToString() + '|' + $PSVersionTable.PSEdition"),
         env=sandbox.env(),
     )
     info = plain(result.stdout + result.stderr).strip()
@@ -309,16 +327,32 @@ def step_install(sandbox: Sandbox, powershell: str) -> None:
     check("安装记录已写入 state 目录", "version=local-build" in record, f"{sandbox.manifest.parent.name}/install.conf")
 
 
-def step_check(sandbox: Sandbox) -> str:
+def step_check(sandbox: Sandbox, tag: str) -> str:
+    """``--check`` in both flavours.
+
+    The explicit-tag flavour is strict (no API involved); the API flavour is
+    what users hit first, but the unauthenticated limit (60/h/IP) is shared with
+    everything else on the runner's egress IP, so a rate limit is reported as a
+    warning — the documented fallback is exactly ``--version vX.Y.Z``.
+    """
     say("== 4) update --check(只查询,不下载) ==")
     before = sha256(sandbox.binary)
-    result = sandbox.orzmc("update", "--check")
-    text = plain(result.stdout + result.stderr)
-    current = re.search(r"当前版本: *(\S+)", text)
-    latest = re.search(r"最新版本: *(\S+)", text)
-    check("`--check` 成功并打印当前/最新版本", result.returncode == 0 and bool(current) and bool(latest), text.strip())
+    if tag:
+        strict = sandbox.orzmc("update", "--check", "-v", tag)
+        text = plain(strict.stdout + strict.stderr)
+        check(f"--check -v {tag} 成功并打印版本", strict.returncode == 0 and tag in text, text.strip())
+    else:
+        say("  [WARN] 无法解析最新 tag(网络?),跳过显式版本检查")
+    api = sandbox.orzmc("update", "--check")
+    api_text = plain(api.stdout + api.stderr).strip()
+    if api.returncode == 0:
+        check("--check 走 GitHub API 成功", True, api_text.replace("\n", " ")[:90])
+    elif "无法获取最新版本信息" in api_text:
+        say(f"  [WARN] GitHub API 暂不可用(限流?);库已提供 --version 回退:{api_text.splitlines()[-1][:80]}")
+    else:
+        check("--check API 路径", False, api_text)
     check("--check 不会改动二进制", sha256(sandbox.binary) == before)
-    return latest.group(1) if latest else ""
+    return tag
 
 
 def step_swap_from_file(sandbox: Sandbox) -> None:
@@ -402,20 +436,17 @@ def step_oneline(sandbox: Sandbox, powershell: str, skip: bool, skip_download: b
     with serve_docs() as base:
         if IS_WINDOWS:
             url = f"{base}/install.ps1"
-            command = (
+            body = (
                 f"& ([scriptblock]::Create((irm '{url}'))) -file '{BUILT_BINARY}' "
                 f"-dir '{sandbox.oneline_dir}' -no-modify-rc"
             )
-            result = run(
-                [powershell, "-NoProfile", "-NonInteractive", "-Command", command],
-                env={**sandbox.env_oneline(), "ORZMC_INSTALL_URL": url},
-            )
+            result = run(ps_command(powershell, body), env={**sandbox.env_oneline(), "ORZMC_INSTALL_URL": url})
             _check_piped(result, sandbox.oneline_dir, sandbox.oneline_state_base, f"scriptblock({label})")
             if skip_download:
                 say("  已跳过字面 `irm | iex`(--skip-download)")
             else:
                 literal = run(
-                    [powershell, "-NoProfile", "-NonInteractive", "-Command", "irm $env:ORZMC_INSTALL_URL | iex"],
+                    ps_command(powershell, "irm $env:ORZMC_INSTALL_URL | iex"),
                     env={**sandbox.env_iex(), "ORZMC_INSTALL_URL": url},
                 )
                 _check_piped(literal, sandbox.iex_dir, sandbox.iex_state_base, f"字面 {label}")
@@ -475,6 +506,7 @@ def main(argv: list[str] | None = None) -> int:
     global _verbose
     args = build_parser().parse_args(argv)
     _verbose = args.verbose
+    force_utf8_stdio()
     sandbox = Sandbox(keep=args.keep)
     shell = args.powershell
     if not IS_WINDOWS and shell != "powershell":
@@ -482,11 +514,13 @@ def main(argv: list[str] | None = None) -> int:
         shell = "powershell"
     flavour = _shell_label(shell) if IS_WINDOWS else "sh"
     say(f"平台: {sys.platform} {os.name} | 安装器 shell: {flavour} | 临时目录: {sandbox.root}")
+    tag = latest_release_tag()
+    say(f"最新 release tag: {tag or '(无法解析)'}")
     try:
         step_build(args.skip_build)
         step_shell_info(sandbox, shell, args.expect_ps_major)
         step_install(sandbox, shell)
-        latest = step_check(sandbox)
+        latest = step_check(sandbox, tag)
         step_swap_from_file(sandbox)
         step_download(sandbox, latest, args.skip_download, shell)
         step_bad_version(sandbox, shell)

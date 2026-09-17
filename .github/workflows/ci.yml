@@ -166,6 +166,11 @@ jobs:
     timeout-minutes: 30
     env:
       UV_PYTHON_PREFERENCE: only-managed
+      # `orzmc update --check` reads the Releases API from the *built binary*;
+      # the unauthenticated limit (60/h/IP) is shared with every other job on
+      # the runner's egress IP, so give it a token (the library honours
+      # GITHUB_TOKEN / GH_TOKEN and still works without one).
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - name: Install uv

@@ -96,11 +96,19 @@ def _updater(fs: FileStore, binary: str, http: FakeHttp, **kwargs) -> SelfUpdate
     )
 
 
-def _run_applier(process: FakeProcess) -> None:
-    """Play the detached helper's part: its last two args are staged → target."""
+def _run_applier(process: FakeProcess, binary: str) -> None:
+    """Play the detached helper's part (its real self is covered by the e2e harness).
+
+    The staged path is deterministic, so the tests never parse the helper
+    command — its shape differs per platform (POSIX passes ``staged target`` as
+    argv, Windows embeds both paths inside the PowerShell script).
+    """
     assert process.detached, "升级助手未被拉起"
-    staged, target = process.detached[-1][-2], process.detached[-1][-1]
-    os.replace(staged, target)
+    command = process.detached[-1]
+    staging = os.path.join(os.path.dirname(binary), STAGING_NAME)
+    assert any(staging in arg for arg in command), command
+    assert any(binary in arg for arg in command), command
+    os.replace(staging, binary)
 
 
 class TestAssetFor:
@@ -230,7 +238,7 @@ class TestUpdateFromLocalFile:
         assert fs.read_text(binary) == "old-binary-content"
         assert os.path.exists(os.path.join(os.path.dirname(binary), STAGING_NAME))
         # … the helper does it after we exit
-        _run_applier(process)
+        _run_applier(process, binary)
         assert fs.read_text(binary) == _payload().decode("latin-1")
         assert not os.path.exists(os.path.join(os.path.dirname(binary), STAGING_NAME))
         assert any("本命令退出后生效" in text for text in reporter.texts)
@@ -243,7 +251,7 @@ class TestUpdateFromLocalFile:
         _fs, binary = _install(tmp_path)
         process = FakeProcess()
         update_self(binary, file=_new_binary(tmp_path), version="v2.0.0", yes=True, process=process)
-        _run_applier(process)
+        _run_applier(process, binary)
         assert os.stat(binary).st_mode & stat.S_IXUSR
 
     def test_non_executable_payload_is_rejected(self, tmp_path) -> None:
@@ -327,7 +335,7 @@ class TestUpdateFromNetwork:
         result = _updater(fs, binary, http, reporter=reporter, sink=FakeSink(), process=process).update(yes=True)
         assert result is not None and result.applied is True
         assert [url for _, url in http.requests] == [f"{DOWNLOAD_BASE}/v2.1.0/{asset}"]
-        _run_applier(process)
+        _run_applier(process, binary)
         assert fs.read_text(binary) == _payload().decode("latin-1")
         found = InstallManifest.find(fs, binary=binary)
         assert found is not None
@@ -405,5 +413,5 @@ class TestGuards:
             binary, file=_new_binary(tmp_path), version="v2.0.0", yes=True, force=True, process=process
         )
         assert result is not None and result.applied is True
-        _run_applier(process)
+        _run_applier(process, binary)
         assert fs.read_text(binary) == _payload().decode("latin-1")

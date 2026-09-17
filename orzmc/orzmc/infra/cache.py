@@ -27,6 +27,11 @@ from orzmc.infra.log import NullReporter, Reporter
 from orzmc.infra.progress import NullProgress, ProgressSink
 
 DEFAULT_TTL = 24 * 60 * 60  # 24h — the one metadata freshness policy
+# Tolerate a *small* future mtime: Windows file times plus a coarse
+# ``time.time()`` tick can date a just-written file a few ms ahead, which
+# otherwise made every fresh entry look stale (CI caught it: cache misses
+# only on Windows). Beyond this the clock is broken — do not trust it.
+_FUTURE_SKEW = 300.0
 _META_SUBDIR = "meta"
 _UNSAFE = frozenset('/\\:*?"<>| ')
 
@@ -72,6 +77,9 @@ class MetadataCache:
     def is_fresh(self, path: str, *, refresh: bool = False) -> bool:
         """True when ``path`` exists and is younger than the TTL.
 
+        A few hundred ms of future-dated mtime still counts as fresh (see
+        :data:`_FUTURE_SKEW`).
+
         A non-positive TTL disables reuse entirely (every read goes to the
         network), which is handy for tests and for "always fresh" callers.
         """
@@ -80,7 +88,7 @@ class MetadataCache:
         if not self.fs.is_file(path):
             return False
         age = self._now() - self.fs.mtime(path)
-        return 0 <= age < self._ttl
+        return -_FUTURE_SKEW <= age < self._ttl
 
     # ── read / write ────────────────────────────────────────────────────────
 
