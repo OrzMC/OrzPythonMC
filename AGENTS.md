@@ -197,6 +197,7 @@ uv lock                            # 锁定依赖
 ## 发布
 
 - **GITHUB_TOKEN 建的事件不会触发新工作流**(GitHub 的递归保护),这是本流程最容易踩的坑:release-please 用 `GITHUB_TOKEN` 建出的 tag **不会**触发 `release.yml` 的 `push: tags`,结果是「tag 与 Release 都在、但没有二进制、没发 PyPI」。因此 release-please 工作流在检测到「manifest 版本的 release 还没有产物」时**显式** `gh workflow run release.yml --ref main -f tag=vX.Y.Z` 接力(判据幂等:已有 `orzmc-linux-x86_64` 就什么都不做),`release.yml` 收尾发布后再 `gh workflow run pages.yml` 重新部署官网(官网"最新版"是部署期注入的)。两处都需要 `actions: write`。手动补发用同一入口;配了 `RELEASE_PLEASE_TOKEN`(细粒度 PAT)时 tag push 会自己触发,接力代码保留也无害(幂等)。
+- **tag 必须先于 release-please 存在**:草稿 release 不创建 git tag,而 release-please 以「tag 里的版本 = 已发布版本」做 bookkeeping —— 建 tag 若排在它之后,合并 release PR 的那次运行里 manifest 已是新版本而 tag 还没有,它会当成「从未发版」从头扫历史,开出**假 release PR**(2.3.0→#19、2.4.0→#25 各一次)。故 `release-please.yml` 第一步就是「manifest 版本 == 代码版本时按 HEAD 建 tag」(普通提交零 API 调用),接力步保留为幂等兜底;万一仍出现假 PR,**关掉而不是合并**。
 - `release-please-config.json` 里 `"draft": true`:Release 由 release-please 建为 **draft**,可见性交给 `release.yml` 的 `publish` 收尾(二进制 + PyPI 全部落地后才 `--draft=false`),避免"有 Release、没资产"的窗口期被 `releases/latest` 与官网看到。
 - **人按按钮 = 合并 release PR**:`release-please.yml`(push main)让机器人维护 release PR(bump 两处版本 + 写 `CHANGELOG.md` + 更新 manifest);合并它 → 自动打 `vX.Y.Z` tag + 建带 notes 的 GitHub Release → 触发 `release.yml`。紧急时手动 `git tag vX.Y.Z && git push origin vX.Y.Z` 也走同一条流水线。
 - `release.yml` 的 `verify` job 是**发版第一道护栏**:tag 必须等于 `orzmc/version.py` 的版本、且 tag 提交在 `main` 上。不一致会造成客户端自升级死循环(下载→替换→重启后版本没变→再提示升级)与错误的 PyPI 元数据。

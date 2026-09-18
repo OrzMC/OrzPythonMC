@@ -165,6 +165,14 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     assert "--trusted-publishing always" in oidc_job
     assert "check_oidc == true" in oidc_job
     assert "check_oidc != true" in release  # 真正的发布 job 在预检时全部跳过
+    # 假 release PR 的根因是「release-please 做 bookkeeping 时 tag 还不存在」,
+    # 修法是先建 tag 再跑它 —— 顺序反了就会重新长出一个塞满旧提交的 PR。
+    rp = (ROOT / ".github" / "workflows" / "release-please.yml").read_text(encoding="utf-8")
+    assert rp.index("Create the release tag before release-please runs") < rp.index("googleapis/release-please-action")
+    # 只在确实是发布提交时建 tag(避免普通提交误建 tag / 多发 API 调用)。
+    assert "head_version" in rp and "不是发布提交,不建 tag" in rp
+    # 手动 tag / 手动 dispatch 路径下 Release 不存在,prepare 必须能补建 draft。
+    assert 'gh release create "$TAG" --draft' in release
     # PR 标题守卫:release-please 的解析器遇到「带空格的括号」会静默丢弃整条提交
     # (不进 changelog、不触发版本号),所以合并前必须拦下。
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

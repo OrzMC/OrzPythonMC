@@ -23,6 +23,32 @@ jobs:
     steps:
       # 接力步骤要读 .release-please-manifest.json(release-please action 自己不 checkout)。
       - uses: actions/checkout@v7
+      # 顺序很关键:tag 必须在 release-please 之前存在。release-please 以「tag 里的版本 =
+      # 已发布版本」做 bookkeeping,而草稿 release **不会**创建 git tag(GitHub 只在发布时
+      # 建 ref)—— 于是合并 release PR 的那次运行里,manifest 已是新版本但 tag 还不存在
+      # (它由下面的接力步骤才建),release-please 会当成「从未发过版」从头扫历史,开出一个
+      # 塞满几个月前已发布提交的**假 release PR**(2.3.0 → #19、2.4.0 → #25 各中一次)。
+      # 这里先按 HEAD 建 tag,它随后看到的 bookkeeping 状态就是一致的。
+      - name: Create the release tag before release-please runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import json; print(json.load(open(".release-please-manifest.json"))["."])')"
+          tag="v${version}"
+          # 只在「HEAD 就是发布提交」时建:manifest 版本与代码里的版本号一致。
+          head_version="$(python3 -c 'import pathlib,re; print(re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", pathlib.Path("orzmc/orzmc/version.py").read_text())[0])')"
+          if [ "${head_version}" != "${version}" ]; then
+            echo "HEAD 版本(${head_version})≠ manifest(${version})—— 不是发布提交,不建 tag"
+            exit 0
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+            echo "tag ${tag} 已存在 —— bookkeeping 一致,无需处理"
+            exit 0
+          fi
+          sha="$(git rev-parse HEAD)"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="${sha}" >/dev/null
+          echo "已按 HEAD 创建 tag ${tag} → ${sha}(避免 release-please 误判为从未发版)"
       # RELEASE_PLEASE_TOKEN 是可选的可选优化:用 PAT 建的 release PR 才会触发
       # CI(GITHUB_TOKEN 建的 PR 按设计不触发工作流)。没有它也能用,只是 release
       # PR 上没有检查——发版提交只含版本号与 CHANGELOG,风险低。
