@@ -63,6 +63,12 @@ gh workflow run release.yml --ref main -f tag=vX.Y.Z
 
 两条路都走同一套护栏(`verify`:tag == 代码版本、tag 在 main 上)与原子发布(draft → 二进制 → PyPI → 可见)。
 
+### 发版后如果出现「假 release PR」:直接关掉
+
+我们的 release 流程是「release-please 建 **draft** release → 接力步骤按草稿的 `target_commitish` 建 git tag → 发布流水线」,而草稿 release **不会**创建 git tag。release-please 在同一次运行里做「下一次该发什么版本」的 bookkeeping 时,tag 还没被建出来 → 它会把「上次发布」的基线算错,开出一个 changelog 里塞满几个月前**早已发布**提交的 PR(例如 2.3.0 发布后出现过 `chore(main): release 2.4.0`)。
+
+**处理方式:直接关掉它。** 版本基线由 `.release-please-manifest.json` + 已存在的 tag 决定,下一次有真实可发布提交时 release-please 会在正确基线上重算并新开 PR(已实测:关掉后推一个 `docs:` 提交不会再冒出假 PR)。Review release PR 时请务必核对 changelog 里的提交是否都是**本次**新增的 —— 这条就是为此存在的。
+
 ### 版本策略:预稳定期破坏性变更暂走 minor
 
 当前处于 2.x 预稳定期(API 仍在收敛、用户面很小),**破坏性 API 变更暂不使用 `feat!` / `BREAKING CHANGE:`**(那会让 release-please 直接推 major),而是走 minor 并在 CHANGELOG 里人工注明影响;等准备把 API 冻结成 3.0.0 时再启用 `!`。这条是刻意选择,不是疏忽。
