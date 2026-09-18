@@ -100,6 +100,18 @@ PR 标题会成为 squash 提交的标题(也就是 release-please 的输入)。
 
 CI 的 `pr-title` job 会在合并前拦下这类标题(以及不符合 Conventional Commits 的标题),已列进 `main` 的必需检查。
 
+## 发版后:核对 PyPI 产源证明
+
+发布文件带 **PEP 740 attestation**(`pypi` job 里 `pypi-attestations sign` 生成,uv 负责上传)。发布后可以这样确认它真的生效 —— provenance 不在 PyPI 的 JSON API 里,只能用 `/integrity/` 端点或 PyPA 工具:
+
+```bash
+curl -sI https://pypi.org/integrity/orzmc/<版本>/orzmc-<版本>-py3-none-any.whl/provenance  # 200 = 有
+uvx "pypi-attestations==0.0.30" verify pypi "pypi:orzmc-<版本>-py3-none-any.whl" \
+  --repository https://github.com/OrzMC/OrzPythonMC
+```
+
+注意 `--repository` 是**构建产地仓库**(签名声明里的来源),不是发布者;填错会报 `provenance was signed by repository "X", expected "Y"` —— 这是校验在工作,不是故障。
+
 ## 不要做的事
 
 - 不要手改 `CHANGELOG.md`、`orzmc/version.py`、`orzmc_app/orzmc_app/__init__.py` 的版本(release PR 会覆盖;`x-release-please-version` 注释不要删)。
