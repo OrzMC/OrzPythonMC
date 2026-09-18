@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.3.0...v2.4.0) (2026-09-18)
+
+
+### Features
+
+* **release:** PyPI 包附带 PEP 740 产源证明,并给出校验方法 ([#23](https://github.com/OrzMC/OrzPythonMC/issues/23)) ([e132d9c](https://github.com/OrzMC/OrzPythonMC/commit/e132d9c6d00ce04e6e6673d20b59e39008dfda24))
+
 ## [2.3.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.2.1...v2.3.0) (2026-09-18)
 
 
