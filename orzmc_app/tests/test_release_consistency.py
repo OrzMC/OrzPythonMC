@@ -118,7 +118,10 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     # 静默失败);默认分支必须走上下文表达式。
     default_branch = '--ref "${{ github.event.repository.default_branch }}"'
     assert f'gh workflow run release.yml {default_branch} -f tag="$tag"' in please
-    assert f"gh workflow run pages.yml {default_branch}" in release
+    # 显式把 tag 传给 Pages:releases/latest 的解析会滞后,刚发完版部署会注入上一个版本。
+    assert f'gh workflow run pages.yml {default_branch} -f tag="$TAG"' in release
+    pages = PAGES_WORKFLOW.read_text(encoding="utf-8")
+    assert "inputs.tag" in pages and "tag:" in pages
     for path in (ROOT / ".github" / "workflows").glob("*.yml"):
         assert "GITHUB_DEFAULT_BRANCH" not in path.read_text(encoding="utf-8"), path.name
     # 草稿 release 不创建 git tag(GitHub 只在发布时建 ref),而流水线要 checkout 它 ——

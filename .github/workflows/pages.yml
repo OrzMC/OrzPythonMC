@@ -8,6 +8,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "要注入 index.html 的版本 tag(如 v2.2.1);留空则用 releases/latest 解析"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -39,16 +44,22 @@ jobs:
       - name: Inject the latest release tag into index.html
         run: |
           set -euo pipefail
-          # 用非 API 的 302 端点解析最新 tag(REST API 限流 60 次/时/IP,CI 与共享出口必中)。
-          # 注意不能带 -L:跟随重定向后 %{redirect_url} 会是空串 —— 与 install.sh 同一个坑。
-          redirect="$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/${GITHUB_REPOSITORY}/releases/latest" || true)"
-          case "$redirect" in
-            */releases/tag/*) tag="${redirect##*/releases/tag/}" ;;
-            *)
-              echo "::warning::无法解析最新 release tag(仓库还没有 release?),页面保留占位符并回退到 GitHub API"
-              exit 0
-              ;;
-          esac
+          # 优先用发布流水线显式传进来的 tag:releases/latest 的解析(GitHub 的
+          # "latest" 标记 + CDN 缓存)可能滞后几十秒,刚发完版就部署会注入**上一个**版本
+          # (真发生过:v2.2.1 发布后的那次部署注入的仍是 v2.2.0)。
+          tag="${{ inputs.tag }}"
+          if [ -z "${tag}" ]; then
+            # 否则用非 API 的 302 端点解析(REST API 限流 60 次/时/IP,CI 与共享出口必中)。
+            # 注意不能带 -L:跟随重定向后 %{redirect_url} 会是空串 —— 与 install.sh 同一个坑。
+            redirect="$(curl -sS -o /dev/null -w '%{redirect_url}' "https://github.com/${GITHUB_REPOSITORY}/releases/latest" || true)"
+            case "$redirect" in
+              */releases/tag/*) tag="${redirect##*/releases/tag/}" ;;
+              *)
+                echo "::warning::无法解析最新 release tag(仓库还没有 release?),页面保留占位符并回退到 GitHub API"
+                exit 0
+                ;;
+            esac
+          fi
           grep -q '__ORZMC_LATEST_TAG__' docs/index.html || {
             echo "::error::docs/index.html 缺少 __ORZMC_LATEST_TAG__ 占位符,无法注入最新版本"
             exit 1
