@@ -1,8 +1,13 @@
 """ProgressSink protocol + rich default implementation.
 
 A single shared sink is used for a whole operation: ``start(desc, total)``
-reconfigures the current task, ``advance(n)`` moves it forward and ``finish()``
-closes it. Callers never touch the rendering details.
+reconfigures the current task, ``advance(n)`` moves it forward and
+``finish()`` closes it. Callers never touch the rendering details.
+
+Two kinds of tasks are distinguished, because the same numbers mean different
+things: :meth:`ProgressSink.start` counts **items** (the ~5000 asset files)
+while :meth:`ProgressSink.start_bytes` counts **bytes** (a single download).
+Only the byte flavour can render a transfer speed / human-readable size / ETA.
 """
 
 from __future__ import annotations
@@ -18,7 +23,16 @@ class ProgressSink(ABC):
     """Abstract progress display. The app layer injects its own."""
 
     @abstractmethod
-    def start(self, desc: str, total: int | None = None) -> None: ...
+    def start(self, desc: str, total: int | None = None) -> None:
+        """Start (or reconfigure) an **item-count** task: ``advance(n)`` adds N items."""
+
+    def start_bytes(self, desc: str, total: int | None = None) -> None:
+        """Start (or reconfigure) a **byte-count** task.
+
+        Defaults to :meth:`start`, so third-party sinks keep working; sinks that
+        can render more (transfer speed, ``23.4/39.2 MB``, ETA) override it.
+        """
+        self.start(desc, total)
 
     @abstractmethod
     def advance(self, n: int = 1) -> None: ...
@@ -72,9 +86,7 @@ def _percentage_column() -> Any:
     "0.0%" next to a pulsing bar and read as stuck — so hide it, same rule as
     the count column. For file counts the percentage says more than the raw
     number ("1234 / 5057" vs "24.4%"), for byte downloads it is the familiar
-    percentage bar. Actual throughput is not shown on purpose: the same task
-    type carries both byte counts and file counts, so a speed column would
-    print nonsense for one of them.
+    percentage bar.
     """
     from rich.progress import ProgressColumn
     from rich.text import Text
@@ -89,23 +101,45 @@ def _percentage_column() -> Any:
 class RichProgress(ProgressSink):
     """Renders one rich progress task; reused across a whole operation.
 
+    The column set is swapped per task kind: item tasks show raw counts, byte
+    tasks show ``23.4/39.2 MB`` + ``4.1 MB/s`` + ETA. A speed column cannot be
+    shown for both — rich formats it as a size per second, which would print
+    nonsense for a file count.
+
     ``console`` (optional) is the test seam: passing a ``Console`` with
     ``force_terminal=True`` makes rendering observable without a real TTY.
     """
 
     def __init__(self, console: Console | None = None) -> None:
-        from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn
+        from rich.progress import (
+            BarColumn,
+            DownloadColumn,
+            Progress,
+            SpinnerColumn,
+            TextColumn,
+            TimeElapsedColumn,
+            TimeRemainingColumn,
+            TransferSpeedColumn,
+        )
 
-        self._progress = Progress(
+        self._item_columns = (
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             _count_column(),
             _percentage_column(),
             TimeElapsedColumn(),
             SpinnerColumn(),
-            console=console,
         )
-        self._task_id: TaskID | None = None
+        self._byte_columns = (
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            SpinnerColumn(),
+        )
+        self._progress = Progress(*self._item_columns, console=console)
+        self._task_id: Any = None
 
     @property
     def is_live(self) -> bool:
@@ -118,6 +152,15 @@ class RichProgress(ProgressSink):
             self._progress.start()
 
     def start(self, desc: str, total: int | None = None) -> None:
+        self._begin(desc, total, byte=False)
+
+    def start_bytes(self, desc: str, total: int | None = None) -> None:
+        self._begin(desc, total, byte=True)
+
+    def _begin(self, desc: str, total: int | None, *, byte: bool) -> None:
+        # Swap the column set *before* the task is (re)configured, so the first
+        # rendered frame already has the right shape for this task kind.
+        self._progress.columns = self._byte_columns if byte else self._item_columns
         self._ensure_live()
         if self._task_id is None:
             self._task_id = self._progress.add_task(desc, total=total)

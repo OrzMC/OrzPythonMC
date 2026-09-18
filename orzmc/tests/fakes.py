@@ -51,10 +51,16 @@ class FakeReporter(Reporter):
 class FakeSink(ProgressSink):
     def __init__(self) -> None:
         self.starts: list[tuple[str, int | None]] = []
+        # 字节任务单独记一份:断言「单文件下载用 start_bytes(带速度/大小),批量用计数」。
+        self.byte_starts: list[tuple[str, int | None]] = []
         self.advanced = 0
         self.finishes = 0
 
     def start(self, desc: str, total: int | None = None) -> None:
+        self.starts.append((desc, total))
+
+    def start_bytes(self, desc: str, total: int | None = None) -> None:
+        self.byte_starts.append((desc, total))
         self.starts.append((desc, total))
 
     def advance(self, n: int = 1) -> None:
