@@ -86,6 +86,20 @@ gh workflow run release.yml --ref main -f tag=vX.Y.Z
   **已完成(2026-09)**:预检两个包均通过,CI 侧已切成 OIDC-only(`release.yml` 无 `UV_PUBLISH_TOKEN`,`publish_idempotent.sh` 没有 token 回退),两个 `PYPI_API_TOKEN_*` secret 已删除。若将来 OIDC 因故不可用,`pypi` job 会**直接失败**(不会静默降级),按提示重配 publisher 或临时补一个 token env 即可;因为 `publish` job 依赖 `pypi`,`releases/latest` 不会被半成品污染。PyPI 账号里那两个旧 token 建议自行 revoke(仓库侧已不再引用)。
 - 分支保护:`main` 要求 `quality` 与 `test (ubuntu-latest, x86_64)` 通过、squash-only、admin 可绕过。
 
+## 提交信息:标题里别用「带空格的括号」
+
+PR 标题会成为 squash 提交的标题(也就是 release-please 的输入)。conventional-commits 解析器有个坑:**描述里出现带空格的括号**会让它整条放弃这条提交 ——
+
+```
+❯ commit could not be parsed: feat(release): 补 PEP 740 attestation(PyPI provenance) (#21)
+❯ error message: Error: unexpected token ' ' at 6:71, valid tokens [)]
+✔ No user facing commits found … - skipping
+```
+
+后果是**静默的**:这个 `feat`/`fix` 既不进 changelog 也不触发版本号,没有任何红灯(真踩过)。写 `(#21)`、`(Range)` 这种无空格括号都没问题;要表达「带说明的括号」就用冒号或连字符,比如 `feat(release): 补 PEP 740 attestation——PyPI provenance`。
+
+CI 的 `pr-title` job 会在合并前拦下这类标题(以及不符合 Conventional Commits 的标题),已列进 `main` 的必需检查。
+
 ## 不要做的事
 
 - 不要手改 `CHANGELOG.md`、`orzmc/version.py`、`orzmc_app/orzmc_app/__init__.py` 的版本(release PR 会覆盖;`x-release-please-version` 注释不要删)。
