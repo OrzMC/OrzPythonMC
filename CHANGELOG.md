@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.3.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.2.1...v2.3.0) (2026-09-18)
+
+
+### Features
+
+* **release:** PyPI 发布切到 OIDC(Trusted Publisher) ([#16](https://github.com/OrzMC/OrzPythonMC/issues/16)) ([e0a55ac](https://github.com/OrzMC/OrzPythonMC/commit/e0a55ac72a0af153dabb7dc09cbef2afed52f9dd))
+
+
+### Bug Fixes
+
+* **pages:** 发布流水线把 tag 显式传给 Pages(消除注入滞后) ([#17](https://github.com/OrzMC/OrzPythonMC/issues/17)) ([fb3fef8](https://github.com/OrzMC/OrzPythonMC/commit/fb3fef88d56f507e8eeed6cccf093ca4d2fc2604))
+* **release:** OIDC 预检并入 release.yml + 发布收尾为 OIDC-only ([#18](https://github.com/OrzMC/OrzPythonMC/issues/18)) ([971b809](https://github.com/OrzMC/OrzPythonMC/commit/971b809bd244ab8943df62a1cdd9e5a0a1604f80))
+
 ## [2.2.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.2.0...v2.2.1) (2026-09-18)
 
 
