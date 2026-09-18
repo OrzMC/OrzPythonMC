@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.2.0...v2.2.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* **release:** 所有 checkout 钉死被发布提交 + 二进制自报版本自检(修 2.2.0 二进制版本错误) ([#14](https://github.com/OrzMC/OrzPythonMC/issues/14)) ([4566f76](https://github.com/OrzMC/OrzPythonMC/commit/4566f764224bc764017bf2ab344e89b4069a8426))
+
 ## [2.2.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.1.0...v2.2.0) (2026-09-18)
 
 
