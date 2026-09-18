@@ -32,6 +32,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # PR 标题就是 squash 提交的标题,而 release-please 用 conventional-commits 解析它。
+  # 实测:标题里出现**带空格的括号**(如 `(PyPI provenance)`)会让解析器整条放弃
+  # (`unexpected token ' ' ... valid tokens [)]`),后果是这个 feat/fix 既不进 changelog
+  # 也不触发版本号 —— 而且没有任何红灯。所以在合并前拦下。
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: PR title must be a parseable Conventional Commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        # 用 python3 而不是 grep -P:BSD/macOS 的 grep 没有 -P,那样本地测不了、
+        # 守卫会假通过(写这条时就踩过)。
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+
+          title = os.environ["TITLE"]
+          if re.search(r"\([^)]*\s[^)]*\)", title):
+              print(
+                  "::error::PR 标题里的括号不能含空格(如 `(PyPI provenance)`)—— "
+                  "release-please 的解析器会整条放弃这条提交:不进 changelog、不触发版本号,"
+                  "而且没有任何红灯。改用冒号/连字符或去掉括号。"
+              )
+              sys.exit(1)
+          if not re.match(r"^(feat|fix|perf|refactor|docs|chore|ci|test|build|style|revert)(\([^)]+\))?!?: .+", title):
+              print("::error::PR 标题不符合 Conventional Commits,例如 `feat(download): 支持断点续传`")
+              sys.exit(1)
+          print(f"标题可用(会成为 squash 提交): {title}")
+          PY
+
   # Platform-independent checks: run once, fail fast before fanning out.
   quality:
     runs-on: ubuntu-latest

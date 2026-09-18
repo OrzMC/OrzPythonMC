@@ -165,6 +165,12 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     assert "--trusted-publishing always" in oidc_job
     assert "check_oidc == true" in oidc_job
     assert "check_oidc != true" in release  # 真正的发布 job 在预检时全部跳过
+    # PR 标题守卫:release-please 的解析器遇到「带空格的括号」会静默丢弃整条提交
+    # (不进 changelog、不触发版本号),所以合并前必须拦下。
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "pr-title" in ci and "github.event.pull_request.title" in ci
+    assert "[^)]*\\s[^)]*" in ci  # 带空格的括号检测
+    assert "Conventional Commits" in ci
     # PEP 740 provenance:uv 只上传 dist 里已存在的 *.publish.attestation,不生成它们。
     # 所以(i)发版前必须签名,(ii)要在预检里验证签名能成功(否则只能等发版踩雷)。
     assert "pypi-attestations==0.0.30" in release  # 产 provenance 的工具钉版本
