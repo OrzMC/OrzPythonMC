@@ -111,6 +111,10 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     assert f"gh workflow run pages.yml {default_branch}" in release
     for path in (ROOT / ".github" / "workflows").glob("*.yml"):
         assert "GITHUB_DEFAULT_BRANCH" not in path.read_text(encoding="utf-8"), path.name
+    # 草稿 release 不创建 git tag(GitHub 只在发布时建 ref),而流水线要 checkout 它 ——
+    # 接力步骤必须先把 tag 按 target_commitish 建出来,否则 verify 直接 "tag not found"。
+    assert "git/refs" in please and "target_commitish" in please
+    assert please.index("git/refs") < please.index("gh workflow run release.yml")
     assert "actions: write" in please
     # release 可见性交给 release.yml 的收尾(publish),所以由 release-please 建 draft。
     config = json.loads((ROOT / "release-please-config.json").read_text(encoding="utf-8"))
