@@ -104,6 +104,16 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     please = (ROOT / ".github" / "workflows" / "release-please.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch" in release and "tag:" in release
+    # release.yml 的每个 checkout 都必须钉到被发布的提交:手动 dispatch 时 github.ref 是
+    # 分支,不钉 ref 就会用分支代码构建、再用 --clobber 覆盖正确产物(真踩过:2.2.0 的
+    # 二进制自报 2.1.0)。
+    release_ref = "ref: ${{ inputs.tag || github.ref }}"
+    steps = re.findall(r"- uses: actions/checkout@v7\n?((?:        .*\n)*)", release)
+    assert steps, "release.yml 里找不到 checkout"
+    for body in steps:
+        assert release_ref in body, f"checkout 缺少 ref 钉死:\n{body}"
+    # 构建产物必须自报被发布的版本(最后一道防线)。
+    assert "./dist/orzmc* version" in release and "TAG#v" in release
     # GITHUB_DEFAULT_BRANCH 不是 Actions 的默认环境变量(set -u 下 unbound,曾让这一步
     # 静默失败);默认分支必须走上下文表达式。
     default_branch = '--ref "${{ github.event.repository.default_branch }}"'
