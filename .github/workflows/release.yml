@@ -55,6 +55,26 @@ jobs:
         run: uv sync --frozen --all-packages
       - name: Build distributions
         run: uv build --all-packages
+      - name: Sign distributions (PEP 740 attestation)
+        # uv 默认只上传 dist 里**已存在**的 *.publish.attestation,自己不生成 —— 不签的话
+        # PyPI 会显示 "No provenance available"。PyPA 的 pypi-attestations 用本 job 的
+        # GitHub OIDC 身份向 sigstore(Fulcio/Rekor)签 bundle,所以必须有 id-token: write。
+        # 版本钉死:这是产 provenance 的工具,不能跟着浮动。
+        run: uvx "pypi-attestations==0.0.30" sign dist/*.whl dist/*.tar.gz
+      - name: Check PEP 740 attestation generation
+        run: |
+          set -euo pipefail
+          # 签名能不能成功必须能在**不发版**的情况下验证(否则只能等下次发版踩雷):
+          # 数签名产物 —— uv 正是靠这些 *.publish.attestation 文件才会上传 attestation。
+          count="$(find dist -name '*.publish.attestation' | wc -l | tr -d ' ')"
+          expected="$(find dist \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l | tr -d ' ')"
+          echo "attestation: ${count} 份 / 发行件: ${expected} 个"
+          find dist -name '*.publish.attestation' -exec basename {} \;
+          if [ "${count}" != "${expected}" ] || [ "${count}" = "0" ]; then
+            echo "::error::attestation 数量与发行件不一致 —— 部分文件不会带 provenance"
+            exit 1
+          fi
+          echo "OK:每个发行件都有 attestation"
       - name: Check the OIDC exchange for both projects
         run: |
           set -uo pipefail
@@ -294,7 +314,13 @@ jobs:
         run: uv sync --frozen --all-packages
       - name: Build distributions
         run: uv build --all-packages
-      # 按包拆分发布:每个包只用自己 scope 的 API token。
+      - name: Sign distributions (PEP 740 attestation)
+        # uv 默认只上传 dist 里**已存在**的 *.publish.attestation,自己不生成 —— 不签的话
+        # PyPI 会显示 "No provenance available"。PyPA 的 pypi-attestations 用本 job 的
+        # GitHub OIDC 身份向 sigstore(Fulcio/Rekor)签 bundle,所以必须有 id-token: write。
+        # 版本钉死:这是产 provenance 的工具,不能跟着浮动。
+        run: uvx "pypi-attestations==0.0.30" sign dist/*.whl dist/*.tar.gz
+      # 按包拆分发布:每个包只用自己 scope 的 OIDC 身份。
       # 注意 glob:dist/orzmc-* 不会误匹配 orzmc_app-*(下划线)。
       # 幂等:已在 PyPI 上的版本直接跳过 —— 发布流水线会因为「某个平台二进制失败」
       # 或「官网重部署失败」被重跑,而 PyPI 不允许覆盖同名版本,不跳过就会整条红。
