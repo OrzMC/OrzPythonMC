@@ -12,6 +12,7 @@ release-please 悄悄不再 bump 版本号、发版少了「tag == 代码版本�
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -131,5 +132,17 @@ def test_version_files_are_wired_into_release_please() -> None:
     config = json.loads((ROOT / "release-please-config.json").read_text(encoding="utf-8"))
     assert config["release-type"] == "simple"
     configured = {entry["path"] for entry in config["packages"]["."]["extra-files"]}
-    assert configured == {"orzmc/version.py", "orzmc_app/orzmc_app/__init__.py"}
+    # 路径必须真实存在:写错路径 release-please 会**静默跳过**,于是库版本号不跟着
+    # bump,而 tag 与版本号不一致要到 release.yml 的 verify 才红。曾经真踩过:
+    # 配置里写的是 orzmc/version.py,文件其实在 orzmc/orzmc/version.py。
+    for rel in configured:
+        assert (ROOT / rel).is_file(), f"release-please extra-files 路径不存在: {rel}"
+    # 反向也要成立:带标记的版本文件一个都不能漏(用扫描而不是写死列表,否则守卫会
+    # 变成「和实现对账」而不是「和不变式对账」)。
+    marked: set[str] = set()
+    for package in ("orzmc/orzmc", "orzmc_app/orzmc_app"):
+        for path in (ROOT / package).rglob("*.py"):
+            if "x-release-please-version" in path.read_text(encoding="utf-8"):
+                marked.add(str(path.relative_to(ROOT)).replace(os.sep, "/"))
+    assert marked == configured
     assert (ROOT / ".release-please-manifest.json").is_file()
