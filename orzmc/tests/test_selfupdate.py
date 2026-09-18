@@ -17,6 +17,7 @@ from fakes import FakeHttp, FakeProcess, FakeReporter, FakeSink
 
 from orzmc import UpdateCheck, check_self_update, update_self
 from orzmc.infra.fs import FileStore
+from orzmc.infra.transfer import _PROBE_SIZE, PARALLEL_MIN_SIZE
 from orzmc.services import selfupdate
 from orzmc.services.selfinstall import InstallManifest
 from orzmc.services.selfupdate import (
@@ -400,6 +401,27 @@ class TestUpdateFromNetwork:
         assert found is not None
         assert found[1].version == _newer_tag()
         assert found[1].source == f"{DOWNLOAD_BASE}/{_newer_tag()}/{asset}"
+
+    def test_large_asset_is_downloaded_in_parallel_ranges(self, tmp_path) -> None:
+        """自升级二进制约 16MB:走分块并行(Range),拼接后逐字节一致。
+
+        单流在丢包/代理链路上明显更慢,piston-data 类上游实测 4 路约 2 倍。
+        """
+        fs, binary = _install(tmp_path)
+        asset, _tag = asset_for()
+        big = _payload() + b"\0" * PARALLEL_MIN_SIZE  # 魔数仍在开头 → 仍是"可执行文件"
+        http = FakeHttp()
+        http.json_responses = {API_LATEST: {"tag_name": _newer_tag()}}
+        http.canned = {asset: big}
+        process = FakeProcess()
+        result = _updater(fs, binary, http, process=process).update(yes=True)
+        assert result is not None and result.applied is True
+        # 首块(1MiB)兼作探针 + 至少一个并行分块
+        assert len(http.range_requests) >= 2
+        assert http.range_requests[0] == f"bytes=0-{_PROBE_SIZE - 1}"
+        _run_applier(process, binary)
+        with open(binary, "rb") as handle:
+            assert handle.read() == big  # 分块拼接没有损坏
 
     def test_already_latest_skips_the_download(self, tmp_path, running_version) -> None:
         fs, binary = _install(tmp_path, version=_current_tag())

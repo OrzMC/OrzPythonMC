@@ -86,7 +86,7 @@ def download_with_progress(
             url,
             dest,
             on_chunk=lambda n: sink.advance(n),
-            on_open=lambda total: sink.start(desc, total),
+            on_open=lambda total: sink.start_bytes(desc, total),
             timeout=timeout,
         )
     finally:
@@ -117,7 +117,7 @@ def _download_ranged(
             total = _total_size(resp.status_code, resp.headers)
             if resp.status_code != 206 or total is None:
                 return _stream_body(resp, dest, sink, desc, total)
-            sink.start(desc, total)
+            sink.start_bytes(desc, total)
             part_paths.append(f"{dest}.part0")
             with open(part_paths[0], "wb") as f:
                 first_len = _copy_chunks(resp, f, sink.advance)
@@ -214,7 +214,7 @@ def _fetch_range(
 
 def _stream_body(resp: Any, dest: str, sink: ProgressSink, desc: str, total: int | None) -> int:
     """Fallback: write an already-open response body to ``dest`` (Range was ignored)."""
-    sink.start(desc, total)
+    sink.start_bytes(desc, total)
     tmp = f"{dest}.tmp"
     with open(tmp, "wb") as f:
         written = _copy_chunks(resp, f, sink.advance)

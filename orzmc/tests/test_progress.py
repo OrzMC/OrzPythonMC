@@ -7,11 +7,12 @@ without a real TTY, so the desktop UI path is covered by tests.
 from __future__ import annotations
 
 import io
+import time as _time
 from types import SimpleNamespace
 
 from rich.console import Console
 
-from orzmc.infra.progress import NullProgress, RichProgress, _count_column, _percentage_column
+from orzmc.infra.progress import NullProgress, ProgressSink, RichProgress, _count_column, _percentage_column
 
 
 def _sink() -> tuple[RichProgress, io.StringIO]:
@@ -77,6 +78,77 @@ class TestRichProgress:
         NullProgress().start("x", 1)
         NullProgress().advance(1)
         NullProgress().finish()
+
+
+class TestTaskKinds:
+    """字节任务显示大小/速度/剩余时间;计数任务显示原始计数与百分比。
+
+    同一个 sink 要服务两类任务 —— 速度列不能给两者都用:rich 把它格式化成
+    「每秒多少字节」,用在文件计数上就是胡说。
+    """
+
+    def test_byte_task_renders_size_speed_and_eta(self) -> None:
+        sink, buffer = _sink()
+        sink.start_bytes("下载客户端 26.2", 40_000_000)
+        sink.advance(20_000_000)
+        _time.sleep(0.02)  # rich 用「采样队列」估速度:需要两次带时间间隔的更新
+        sink.advance(20_000_000)
+        sink._progress.refresh()
+        out = buffer.getvalue()
+        assert "40.0/40.0 MB" in out  # DownloadColumn:人类可读大小
+        assert "B/s" in out  # TransferSpeedColumn
+        sink.finish()
+        sink.close()
+
+    def test_item_task_shows_counts_without_speed(self) -> None:
+        sink, buffer = _sink()
+        sink.start("下载资源文件(5057)", 5057)
+        sink.advance(2100)
+        sink._progress.refresh()
+        out = buffer.getvalue()
+        assert "2100" in out and "41.5%" in out
+        assert "B/s" not in out
+        sink.finish()
+        sink.close()
+
+    def test_columns_switch_when_a_sink_is_reused(self) -> None:
+        sink, buffer = _sink()
+        sink.start("批量", 10)
+        sink.advance(10)
+        sink.finish()
+        sink.start_bytes("单个大文件", 2048)
+        sink.advance(2048)
+        sink.finish()
+        sink.close()
+        out = buffer.getvalue()
+        assert "批量" in out and "单个大文件" in out
+        assert "B" in out  # 字节任务用人类可读大小
+
+
+def test_null_progress_accepts_byte_tasks() -> None:
+    sink = NullProgress()
+    sink.start_bytes("x", 1)
+    sink.advance(1)
+    sink.finish()
+
+
+def test_default_start_bytes_delegates_to_start() -> None:
+    """自定义 sink 只需实现 start/advance/finish 就能工作(向后兼容)。"""
+
+    class _Minimal(ProgressSink):
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, int | None]] = []
+
+        def start(self, desc: str, total: int | None = None) -> None:
+            self.calls.append((desc, total))
+
+        def advance(self, n: int = 1) -> None: ...
+
+        def finish(self) -> None: ...
+
+    sink = _Minimal()
+    sink.start_bytes("下载", 123)
+    assert sink.calls == [("下载", 123)]
 
 
 class TestCountColumn:
