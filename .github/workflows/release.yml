@@ -3,17 +3,19 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  # release-please 用 GITHUB_TOKEN 建的 tag **不会触发工作流**(GitHub 的递归保护:
-  # 由 GITHUB_TOKEN 产生的事件不再触发新的工作流运行),所以它建完 tag 后必须显式
-  # dispatch 本工作流(见 release-please.yml)。手动补发也用同一个入口:
-  #   gh workflow run release.yml --ref main -f tag=vX.Y.Z
   workflow_dispatch:
     inputs:
       tag:
-        description: 要发布/补发的 tag(如 v2.1.0)
-        required: true
+        description: "要发布的 tag(如 v2.2.1)。check_oidc=true 时可留空。"
+        required: false
         type: string
+      check_oidc:
+        description: "只做 PyPI OIDC 预检(不构建、不发布)"
+        required: false
+        type: boolean
+        default: false
 
+# 权限与并发都按 tag/push 归一化,手动补发与 tag push 走同一条路。
 permissions:
   contents: write
   actions: write # 收尾时 dispatch pages.yml(同样是 GITHUB_TOKEN 不触发事件的问题)
@@ -28,7 +30,70 @@ jobs:
   # 不一致的代价极高:客户端自升级用 `releases/latest` 的 tag 和二进制内嵌
   # `__version__` 比较,版本对不上会变成「下载→替换→重启后版本没变→再提示升级」
   # 的死循环;PyPI 元数据、官网 latest 卡片、安装记录都会跟着错。
+  oidc-check:
+    # 只做 PyPI OIDC 预检:与 pypi job 使用**同一个 workflow 文件**、同一个
+    # environment —— 这点很关键,PyPI 的 Trusted Publisher 里 `Workflow name` 声明的是
+    # **文件名**,所以放在单独的工作流文件里根本校验不到 release.yml 那行配置
+    # (实测 PyPI 回 invalid-publisher:valid token, but no corresponding publisher)。
+    if: ${{ inputs.check_oidc == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen --all-packages
+      - name: Build distributions
+        run: uv build --all-packages
+      - name: Check the OIDC exchange for both projects
+        run: |
+          set -uo pipefail
+          failed=0
+          for spec in "orzmc:dist/orzmc-*" "orzmc_app:dist/orzmc_app-*"; do
+            package="${spec%%:*}"
+            files="${spec#*:}"
+            echo "== ${package} =="
+            if uv publish --dry-run --trusted-publishing always "${files}"; then
+              echo "OK: ${package} 的 OIDC 交换成功 —— Trusted Publisher 已配置"
+            else
+              echo "::error::${package} 的 OIDC 交换失败:检查 PyPI 项目 ${package} 的 Settings → Publishing 是否有 publisher(repository=${GITHUB_REPOSITORY},Workflow name 必须是 release.yml,Environment name 必须是 release)"
+              failed=1
+            fi
+          done
+          if [ "${failed}" = "0" ]; then
+            echo "结论:两个包的 OIDC 都可用 —— 发布可以只靠 Trusted Publisher,不需要长期 token。"
+          fi
+          exit "${failed}"
+      - name: Dump the raw PyPI response (diagnostic)
+        # uv 只说 "Failed to obtain token",不转述 PyPI 的原因;直接自己换一次 token
+        # 并把 PyPI 的原始 JSON 打出来 —— 字段不匹配时它会点名。
+        if: failure()
+        run: |
+          set -uo pipefail
+          id_token="$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
+          echo "GitHub OIDC token 已取得(前 40 字符): ${id_token:0:40}…"
+          echo "=== PyPI 对 mint-token 的原始响应 ==="
+          curl -sS -X POST "https://upload.pypi.org/_/oidc/mint-token" \
+            -H 'Content-Type: application/json' \
+            -d "{\"token\": \"${id_token}\"}" \
+            | head -c 2000
+          echo
+
   verify:
+    # check_oidc=true 是「只做 OIDC 预检」,跳过真正的发布流程。
+    if: ${{ inputs.check_oidc != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,6 +102,18 @@ jobs:
           # 需要完整历史做 merge-base(判断 tag 是否落在 main 上)。
           fetch-depth: 0
           ref: ${{ inputs.tag || github.ref }}
+      - name: A tag is required for a real release
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # 手动 dispatch 的 tag 是可选的(预检不需要它)—— 这里补必填校验,免得空 tag
+          # 一路带到上传那一步才炸。
+          if [ -z "${TAG}" ]; then
+            echo "::error::没有 tag:请用 -f tag=vX.Y.Z(或由 tag push 触发);只做 OIDC 预检请用 -f check_oidc=true。"
+            exit 1
+          fi
+          echo "release tag: ${TAG}"
       - name: Tag matches the version in orzmc/version.py
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
@@ -71,6 +148,8 @@ jobs:
 
   quality:
     needs: verify
+    # check_oidc=true 是「只做 OIDC 预检」,跳过真正的发布流程。
+    if: ${{ inputs.check_oidc != true }}
     uses: ./.github/workflows/ci.yml
     with:
       # 6 平台 pytest 在 main push 已跑过;发版只取单 runner 质量门禁。
@@ -81,6 +160,8 @@ jobs:
   #  - 手动打 tag 时这里用 GitHub 生成的 notes 建 draft,发布前对用户不可见。
   prepare:
     needs: quality
+    # check_oidc=true 是「只做 OIDC 预检」,跳过真正的发布流程。
+    if: ${{ inputs.check_oidc != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -106,6 +187,8 @@ jobs:
 
   binary:
     needs: prepare
+    # check_oidc=true 是「只做 OIDC 预检」,跳过真正的发布流程。
+    if: ${{ inputs.check_oidc != true }}
     strategy:
       fail-fast: false
       matrix:
@@ -188,6 +271,8 @@ jobs:
 
   pypi:
     needs: quality
+    # check_oidc=true 是「只做 OIDC 预检」,跳过真正的发布流程。
+    if: ${{ inputs.check_oidc != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release
@@ -213,14 +298,13 @@ jobs:
       # 注意 glob:dist/orzmc-* 不会误匹配 orzmc_app-*(下划线)。
       # 幂等:已在 PyPI 上的版本直接跳过 —— 发布流水线会因为「某个平台二进制失败」
       # 或「官网重部署失败」被重跑,而 PyPI 不允许覆盖同名版本,不跳过就会整条红。
+      # 认证只用 OIDC(Trusted Publisher),没有长期 token/secret 可泄露。
       - name: Publish orzmc to PyPI
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN_ORZMC_LIB }}
           PACKAGE: orzmc
         run: ./scripts/publish_idempotent.sh
       - name: Publish orzmc_app to PyPI
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN_ORZMC_APP }}
           PACKAGE: orzmc_app
         run: ./scripts/publish_idempotent.sh
 
@@ -229,6 +313,8 @@ jobs:
   # 也不会提前把新版本推给用户。release-please 已发布的 release 上这是 no-op。
   publish:
     needs: [binary, pypi]
+    # check_oidc=true 是「只做 OIDC 预检」,跳过真正的发布流程。
+    if: ${{ inputs.check_oidc != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
