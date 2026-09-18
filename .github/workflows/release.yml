@@ -83,7 +83,9 @@ jobs:
             package="${spec%%:*}"
             files="${spec#*:}"
             echo "== ${package} =="
-            if uv publish --dry-run --trusted-publishing always "${files}"; then
+            # -v:让 uv 打印它找到的 attestation("Found attestation for distribution"),
+            # 这一步是「签名产物真的会被带上」的唯一可验证信号(真正上传要等发版)。
+            if uv publish -v --dry-run --trusted-publishing always "${files}"; then
               echo "OK: ${package} 的 OIDC 交换成功 —— Trusted Publisher 已配置"
             else
               echo "::error::${package} 的 OIDC 交换失败:检查 PyPI 项目 ${package} 的 Settings → Publishing 是否有 publisher(repository=${GITHUB_REPOSITORY},Workflow name 必须是 release.yml,Environment name 必须是 release)"

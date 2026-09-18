@@ -170,6 +170,8 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     assert "pypi-attestations==0.0.30" in release  # 产 provenance 的工具钉版本
     assert release.index("pypi-attestations") < release.index("Publish orzmc to PyPI")
     assert "Check PEP 740 attestation generation" in release
+    # 预检要能证明「uv 会带上这些 attestation」—— 只有 -v 会打印 Found attestation。
+    assert "-v --dry-run --trusted-publishing always" in release
     assert not (ROOT / ".github" / "workflows" / "pypi-oidc-check.yml").exists()
 
 
