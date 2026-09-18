@@ -149,7 +149,10 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     assert script.is_file()
     body = script.read_text(encoding="utf-8")
     assert "--trusted-publishing always" in body  # 强制 OIDC,而不是「有 token 就用 token」
-    assert "UV_PUBLISH_TOKEN" in body  # 迁移期的回退路径
+    # 迁到 OIDC 后不应再有长期凭据:脚本与工作流里都不许出现 token 回退。
+    for text in (body, release):
+        assert "UV_PUBLISH_TOKEN" not in text
+        assert "PYPI_API_TOKEN" not in text
     # OIDC 的硬前提:pypi job 必须自带 id-token: write(job 级 permissions 覆盖工作流级)。
     pypi_job = release.split("\n  pypi:", 1)[1].split("\n  publish:", 1)[0]
     assert "id-token: write" in pypi_job and "contents: read" in pypi_job

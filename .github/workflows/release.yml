@@ -298,14 +298,13 @@ jobs:
       # 注意 glob:dist/orzmc-* 不会误匹配 orzmc_app-*(下划线)。
       # 幂等:已在 PyPI 上的版本直接跳过 —— 发布流水线会因为「某个平台二进制失败」
       # 或「官网重部署失败」被重跑,而 PyPI 不允许覆盖同名版本,不跳过就会整条红。
+      # 认证只用 OIDC(Trusted Publisher),没有长期 token/secret 可泄露。
       - name: Publish orzmc to PyPI
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN_ORZMC_LIB }}
           PACKAGE: orzmc
         run: ./scripts/publish_idempotent.sh
       - name: Publish orzmc_app to PyPI
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN_ORZMC_APP }}
           PACKAGE: orzmc_app
         run: ./scripts/publish_idempotent.sh
 
