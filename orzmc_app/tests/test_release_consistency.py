@@ -23,6 +23,7 @@ from orzmc.services.selfupdate import DOWNLOAD_BASE, asset_for
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "docs" / "index.html"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_PLEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release-please.yml"
 PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
 TAG_PLACEHOLDER = "__ORZMC_LATEST_TAG__"
 
@@ -103,7 +104,13 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     please = (ROOT / ".github" / "workflows" / "release-please.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch" in release and "tag:" in release
-    assert 'gh workflow run release.yml --ref "$GITHUB_DEFAULT_BRANCH" -f tag="$tag"' in please
+    # GITHUB_DEFAULT_BRANCH 不是 Actions 的默认环境变量(set -u 下 unbound,曾让这一步
+    # 静默失败);默认分支必须走上下文表达式。
+    default_branch = '--ref "${{ github.event.repository.default_branch }}"'
+    assert f'gh workflow run release.yml {default_branch} -f tag="$tag"' in please
+    assert f"gh workflow run pages.yml {default_branch}" in release
+    for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+        assert "GITHUB_DEFAULT_BRANCH" not in path.read_text(encoding="utf-8"), path.name
     assert "actions: write" in please
     # release 可见性交给 release.yml 的收尾(publish),所以由 release-please 建 draft。
     config = json.loads((ROOT / "release-please-config.json").read_text(encoding="utf-8"))

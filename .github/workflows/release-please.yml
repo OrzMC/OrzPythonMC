@@ -52,5 +52,5 @@ jobs:
             exit 0
           fi
           echo "tag ${tag} exists without binaries — dispatching the release pipeline"
-          gh workflow run release.yml --ref "$GITHUB_DEFAULT_BRANCH" -f tag="$tag"
+          gh workflow run release.yml --ref "${{ github.event.repository.default_branch }}" -f tag="$tag"
 
