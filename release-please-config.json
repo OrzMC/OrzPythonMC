@@ -9,7 +9,7 @@
       "extra-files": [
         {
           "type": "generic",
-          "path": "orzmc/version.py"
+          "path": "orzmc/orzmc/version.py"
         },
         {
           "type": "generic",
