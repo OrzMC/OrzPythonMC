@@ -165,6 +165,13 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     assert "--trusted-publishing always" in oidc_job
     assert "check_oidc == true" in oidc_job
     assert "check_oidc != true" in release  # 真正的发布 job 在预检时全部跳过
+    # PEP 740 provenance:uv 只上传 dist 里已存在的 *.publish.attestation,不生成它们。
+    # 所以(i)发版前必须签名,(ii)要在预检里验证签名能成功(否则只能等发版踩雷)。
+    assert "pypi-attestations==0.0.30" in release  # 产 provenance 的工具钉版本
+    assert release.index("pypi-attestations") < release.index("Publish orzmc to PyPI")
+    assert "Check PEP 740 attestation generation" in release
+    # 预检要能证明「uv 会带上这些 attestation」—— 只有 -v 会打印 Found attestation。
+    assert "-v --dry-run --trusted-publishing always" in release
     assert not (ROOT / ".github" / "workflows" / "pypi-oidc-check.yml").exists()
 
 

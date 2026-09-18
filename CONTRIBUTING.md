@@ -81,7 +81,7 @@ gh workflow run release.yml --ref main -f tag=vX.Y.Z
      - Owner:`OrzMC`;Repository name:`OrzPythonMC`;Workflow name:**`release.yml`**(必须与工作流文件名完全一致);Environment name:**`release`**(必须与 `release.yml` 里 `pypi` job 的 `environment` 一致)。
      - **三个字段填错都不会在配置时报错**,只会在下次发版/预检时失败 —— 所以配完立刻做第 2 步验证。
   2. 立刻预检(**不用等下次发版**):`gh workflow run release.yml --ref main -f check_oidc=true`,然后 `gh run watch`。它用 `uv publish --dry-run --trusted-publishing always` 真的去换一次 OIDC token,两个包都打印 `OK: … 的 OIDC 交换成功` 才算配好。预检**必须跑在 `release.yml` 里**(所以是同一个文件的一个 job),不能拆成独立工作流:PyPI 的 `Workflow name` 记录的是**文件名**,换个文件就永远对不上(实测 PyPI 回 `invalid-publisher: valid token, but no corresponding publisher`)。失败时该 job 会额外打印 PyPI 的原始响应,直接点名不匹配的字段。
-  3. 发版时 `pypi` job 日志出现 **`已通过 OIDC(Trusted Publisher)发布 …`** 即走的是 OIDC。
+  3. 发版时 `pypi` job 日志出现 **`已通过 OIDC(Trusted Publisher)发布 …`** 即走的是 OIDC;同一 job 还会先跑 `pypi-attestations sign` 生成 PEP 740 attestation,发布后 PyPI 的「Provenance」会显示签名来源(不签就是 `No provenance available`)。预检同一条路(`-f check_oidc=true`)会顺带验证签名可用。
 
   **已完成(2026-09)**:预检两个包均通过,CI 侧已切成 OIDC-only(`release.yml` 无 `UV_PUBLISH_TOKEN`,`publish_idempotent.sh` 没有 token 回退),两个 `PYPI_API_TOKEN_*` secret 已删除。若将来 OIDC 因故不可用,`pypi` job 会**直接失败**(不会静默降级),按提示重配 publisher 或临时补一个 token env 即可;因为 `publish` job 依赖 `pypi`,`releases/latest` 不会被半成品污染。PyPI 账号里那两个旧 token 建议自行 revoke(仓库侧已不再引用)。
 - 分支保护:`main` 要求 `quality` 与 `test (ubuntu-latest, x86_64)` 通过、squash-only、admin 可绕过。
