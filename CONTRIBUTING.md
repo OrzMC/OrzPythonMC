@@ -51,7 +51,7 @@ gh run watch                                             # 跟进结果
    - `verify`:断言 **tag == `orzmc/version.py` 里的版本**、且 tag 指向 `main` 上的提交(防「版本没改就发版」——那会让客户端自升级陷死循环);
    - `quality`:单 runner 质量门禁;
    - `binary`:6 平台 PyInstaller 产物挂到 Release;
-   - `pypi`:两个包分别用各自 scope 的 token 发布到 PyPI;
+   - `pypi`:两个包发布到 PyPI —— **优先 OIDC(Trusted Publisher)**,失败才回退 API token(见下);
    - `publish`:全部成功后才把 Release 从 draft 变可见 —— 半成品(有二进制、没 PyPI 包)不会出现在 `releases/latest`,官网与一键安装也不会提前推新版本。
 4. 官网(`pages.yml`)把「最新版」指向新版本 —— 注意这一步是 `release.yml` **显式 dispatch** 的:GITHUB_TOKEN 产生的 tag/release 事件不会触发工作流,所以整条链路都靠显式接力(见 `AGENTS.md`)。
 
@@ -70,7 +70,13 @@ gh workflow run release.yml --ref main -f tag=vX.Y.Z
 ### 需要人工配置/授权的一次性事项
 
 - `RELEASE_PLEASE_TOKEN`(可选):细粒度 PAT 存到 repo secret,让机器人开的 release PR 也触发 CI;不配则用默认 `GITHUB_TOKEN`(release PR 上无检查,风险低)。
-- PyPI **Trusted Publishing**(可选,替代长期 token):两个包在 PyPI 后台各配 trusted publisher(repo `OrzMC/OrzPythonMC`、workflow `release.yml`、environment `release`),CI 侧加 `permissions: id-token: write` 并把 `UV_PUBLISH_TOKEN` 换成 `uv publish --trusted-publishing always`。
+- PyPI **Trusted Publishing**(推荐,替代长期 token):**只需在 PyPI 后台点几下**,CI 侧已就绪(优先 OIDC、失败回退 token)。
+  1. 两个项目各配一次,进入 <https://pypi.org/manage/project/orzmc/settings/publishing/> 与 <https://pypi.org/manage/project/orzmc-app/settings/publishing/>,点 **Add a new publisher** → **GitHub**,填:
+     - Owner:`OrzMC`;Repository name:`OrzPythonMC`;Workflow name:**`release.yml`**(必须与工作流文件名完全一致);Environment name:**`release`**(必须与 `release.yml` 里 `pypi` job 的 `environment` 一致)。
+     - **三个字段填错都不会在配置时报错**,只会在下次发版/预检时失败 —— 所以配完立刻做第 2 步验证。
+  2. 立刻预检(**不用等下次发版**):`gh workflow run pypi-oidc-check.yml --ref main`,然后 `gh run watch`。它用 `uv publish --dry-run --trusted-publishing always` 真的去换一次 OIDC token,两个包都打印 `OK: … 的 OIDC 交换成功` 才算配好。
+  3. 之后下一次发版看 `pypi` job 日志:出现 **`已通过 OIDC(Trusted Publisher)发布 …`** 就说明真的走 OIDC 了(若是 `::warning:: … 回退到 API token` 则说明还没生效)。
+  4. 确认走通后再收尾:删除两个 token secret(`gh secret delete PYPI_API_TOKEN_ORZMC_LIB PYPI_API_TOKEN_ORZMC_APP`),并清掉 `release.yml` 里两个 `UV_PUBLISH_TOKEN` env 与 `scripts/publish_idempotent.sh` 的 token 回退分支。
 - 分支保护:`main` 要求 `quality` 与 `test (ubuntu-latest, x86_64)` 通过、squash-only、admin 可绕过。
 
 ## 不要做的事

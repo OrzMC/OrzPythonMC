@@ -191,6 +191,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release
+    # PyPI Trusted Publisher(OIDC):job 级 permissions 会**覆盖**工作流级,所以这里要
+    # 显式写全 —— contents: read 给 checkout,id-token: write 是换 OIDC token 的硬前提。
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:

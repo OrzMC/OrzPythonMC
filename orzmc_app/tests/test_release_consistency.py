@@ -139,9 +139,23 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     # actions: write,否则 403 Resource not accessible by integration。
     publish_job = release.split("\n  publish:", 1)[1]
     assert "actions: write" in publish_job
-    # PyPI 不允许覆盖同名版本:重跑发布流水线必须幂等。
+    # PyPI 不允许覆盖同名版本:重跑发布流水线必须幂等;发布优先走 OIDC(Trusted
+    # Publisher),失败才回退 token。
     assert "./scripts/publish_idempotent.sh" in release
-    assert (ROOT / "scripts" / "publish_idempotent.sh").is_file()
+    script = ROOT / "scripts" / "publish_idempotent.sh"
+    assert script.is_file()
+    body = script.read_text(encoding="utf-8")
+    assert "--trusted-publishing always" in body  # 强制 OIDC,而不是「有 token 就用 token」
+    assert "UV_PUBLISH_TOKEN" in body  # 迁移期的回退路径
+    # OIDC 的硬前提:pypi job 必须自带 id-token: write(job 级 permissions 覆盖工作流级)。
+    pypi_job = release.split("\n  pypi:", 1)[1].split("\n  publish:", 1)[0]
+    assert "id-token: write" in pypi_job and "contents: read" in pypi_job
+    # 预检工作流:配好 publisher 后不用等下次发版就能验证 OIDC 交换。
+    preflight = (ROOT / ".github" / "workflows" / "pypi-oidc-check.yml").read_text(encoding="utf-8")
+    assert "workflow_dispatch" in preflight  # 手动触发,不参与日常 CI
+    assert "id-token: write" in preflight
+    assert "environment: release" in preflight  # 必须与 release.yml 的 pypi job 同环境
+    assert "--trusted-publishing always" in preflight
 
 
 @needs_checkout
