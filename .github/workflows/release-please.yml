@@ -69,25 +69,16 @@ jobs:
           set -euo pipefail
           version="$(python3 -c "import json; print(json.load(open('.release-please-manifest.json'))['.'])")"
           tag="v${version}"
-          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq "[.[] | select(.tag_name == \"${tag}\")][0].id // empty")"
-          if [ -z "${release_id}" ]; then
-            echo "no GitHub release for ${tag} yet — nothing to release"
+          # 判据是**tag**(不是 release):tag 现在由上一步提前建好,而 release 可能是
+          # release-please 刚建的 draft、也可能它认为「tag 已在 = 已发布」而没建 —— 后者
+          # 由 release.yml 的 prepare 补建 draft,所以这里只认 tag 就够,不会漏发。
+          if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+            echo "no tag ${tag} yet — nothing to release"
             exit 0
           fi
-          if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx 'orzmc-linux-x86_64'; then
+          if gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx 'orzmc-linux-x86_64'; then
             echo "${tag} already carries binaries — nothing to do"
             exit 0
-          fi
-          # 草稿 release **不会**创建 git tag(GitHub 只在发布时才建 ref),而发布流水线要
-          # checkout 这个 tag —— 所以先按草稿记录的 target_commitish(即 release PR 的合并
-          # 提交)把 tag 建出来。发布(取消 draft)时 GitHub 复用已存在的同名 tag。
-          target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq .target_commitish)"
-          sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${target}" --jq .sha)"
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
-            echo "tag ${tag} 已存在"
-          else
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="${sha}" >/dev/null
-            echo "已创建 tag ${tag} → ${sha}"
           fi
           echo "tag ${tag} exists without binaries — dispatching the release pipeline"
           gh workflow run release.yml --ref "${{ github.event.repository.default_branch }}" -f tag="$tag"

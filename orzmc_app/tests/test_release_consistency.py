@@ -125,9 +125,16 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     for path in (ROOT / ".github" / "workflows").glob("*.yml"):
         assert "GITHUB_DEFAULT_BRANCH" not in path.read_text(encoding="utf-8"), path.name
     # 草稿 release 不创建 git tag(GitHub 只在发布时建 ref),而流水线要 checkout 它 ——
-    # 接力步骤必须先把 tag 按 target_commitish 建出来,否则 verify 直接 "tag not found"。
-    assert "git/refs" in please and "target_commitish" in please
-    assert please.index("git/refs") < please.index("gh workflow run release.yml")
+    # 所以 tag 由 release-please 的**前置**步骤按 HEAD 建出来(顺序见上面的断言),
+    # 否则 verify 直接 "tag not found"。
+    assert "git/refs" in please
+    assert please.index("git/refs") < please.index("googleapis/release-please-action")
+    # 接力判据基于 tag 而不是 release:tag 提前建好后,release 可能还没被 release-please
+    # 建出来(它可能认为「tag 已在 = 已发布」),那种情况也必须 dispatch ——
+    # 否则就是「有 tag、没产物、没发布」的静默停摆(2.1.0 踩过)。
+    assert "no tag ${tag} yet" in please
+    assert "no GitHub release for" not in please
+    assert please.index("no tag ${tag} yet") < please.index("gh workflow run release.yml")
     assert "actions: write" in please
     # release 可见性交给 release.yml 的收尾(publish),所以由 release-please 建 draft。
     config = json.loads((ROOT / "release-please-config.json").read_text(encoding="utf-8"))
@@ -171,6 +178,9 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     assert rp.index("Create the release tag before release-please runs") < rp.index("googleapis/release-please-action")
     # 只在确实是发布提交时建 tag(避免普通提交误建 tag / 多发 API 调用)。
     assert "head_version" in rp and "不是发布提交,不建 tag" in rp
+    # 接力判据必须是「tag 存在且无产物」而不是「release 存在」:tag 现在提前建好,
+    # release 可能还没被 release-please 建出来 —— 那种情况下也要发,否则静默不发版。
+    assert "no tag ${tag} yet" in rp and "no GitHub release for" not in rp
     # 手动 tag / 手动 dispatch 路径下 Release 不存在,prepare 必须能补建 draft。
     assert 'gh release create "$TAG" --draft' in release
     # PR 标题守卫:release-please 的解析器遇到「带空格的括号」会静默丢弃整条提交
