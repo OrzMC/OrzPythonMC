@@ -52,3 +52,19 @@ jobs:
             echo "结论:两个包的 OIDC 都可用,可以把 release.yml 里的 API token 换成 Trusted Publisher(已经是)并删除 PYPI_API_TOKEN_* secrets。"
           fi
           exit "${failed}"
+      - name: Dump the raw PyPI response (diagnostic)
+        # uv 只说 "Failed to obtain token",不转述 PyPI 的原因;直接自己换一次 token
+        # 并把 PyPI 的原始 JSON 打出来 —— 字段填错时它会把不匹配的那一项点名。
+        if: failure()
+        run: |
+          set -uo pipefail
+          id_token="$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
+          echo "GitHub OIDC token 已取得(前 40 字符): ${id_token:0:40}…"
+          echo "=== PyPI 对 mint-token 的原始响应 ==="
+          curl -sS -X POST "https://upload.pypi.org/_/oidc/mint-token" \
+            -H 'Content-Type: application/json' \
+            -d "{\"token\": \"${id_token}\"}" \
+            | head -c 2000
+          echo
