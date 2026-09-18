@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.4.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.4.0...v2.4.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* **release:** 先建 tag 再跑 release-please,消除假 release PR ([#26](https://github.com/OrzMC/OrzPythonMC/issues/26)) ([db4beee](https://github.com/OrzMC/OrzPythonMC/commit/db4beeed16efffa6f0527b4ca5850d0f1bae15e0))
+* **release:** 接力判据改为基于 tag,避免提前建 tag 后漏发版 ([#28](https://github.com/OrzMC/OrzPythonMC/issues/28)) ([93c4b9b](https://github.com/OrzMC/OrzPythonMC/commit/93c4b9b7ea335eec3d42e7287cca5c8540ea80e6))
+
 ## [2.4.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.3.0...v2.4.0) (2026-09-18)
 
 
