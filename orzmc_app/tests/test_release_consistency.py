@@ -153,12 +153,16 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     # OIDC 的硬前提:pypi job 必须自带 id-token: write(job 级 permissions 覆盖工作流级)。
     pypi_job = release.split("\n  pypi:", 1)[1].split("\n  publish:", 1)[0]
     assert "id-token: write" in pypi_job and "contents: read" in pypi_job
-    # 预检工作流:配好 publisher 后不用等下次发版就能验证 OIDC 交换。
-    preflight = (ROOT / ".github" / "workflows" / "pypi-oidc-check.yml").read_text(encoding="utf-8")
-    assert "workflow_dispatch" in preflight  # 手动触发,不参与日常 CI
-    assert "id-token: write" in preflight
-    assert "environment: release" in preflight  # 必须与 release.yml 的 pypi job 同环境
-    assert "--trusted-publishing always" in preflight
+    # OIDC 预检必须和 pypi job 在**同一个 workflow 文件**里:PyPI 的 Trusted Publisher
+    # 把 `Workflow name` 记成文件名,放独立工作流文件里永远校验不到 release.yml 那行配置
+    # (实测 PyPI 回 invalid-publisher)。所以预检是 release.yml 的一个 job + 一个输入。
+    oidc_job = release.split("\n  oidc-check:", 1)[1].split("\n  verify:", 1)[0]
+    assert "environment: release" in oidc_job
+    assert "id-token: write" in oidc_job
+    assert "--trusted-publishing always" in oidc_job
+    assert "check_oidc == true" in oidc_job
+    assert "check_oidc != true" in release  # 真正的发布 job 在预检时全部跳过
+    assert not (ROOT / ".github" / "workflows" / "pypi-oidc-check.yml").exists()
 
 
 @needs_checkout
