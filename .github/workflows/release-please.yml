@@ -43,7 +43,8 @@ jobs:
           set -euo pipefail
           version="$(python3 -c "import json; print(json.load(open('.release-please-manifest.json'))['.'])")"
           tag="v${version}"
-          if ! gh release view "$tag" >/dev/null 2>&1; then
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq "[.[] | select(.tag_name == \"${tag}\")][0].id // empty")"
+          if [ -z "${release_id}" ]; then
             echo "no GitHub release for ${tag} yet — nothing to release"
             exit 0
           fi
@@ -51,6 +52,17 @@ jobs:
             echo "${tag} already carries binaries — nothing to do"
             exit 0
           fi
+          # 草稿 release **不会**创建 git tag(GitHub 只在发布时才建 ref),而发布流水线要
+          # checkout 这个 tag —— 所以先按草稿记录的 target_commitish(即 release PR 的合并
+          # 提交)把 tag 建出来。发布(取消 draft)时 GitHub 复用已存在的同名 tag。
+          target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq .target_commitish)"
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${target}" --jq .sha)"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+            echo "tag ${tag} 已存在"
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="${sha}" >/dev/null
+            echo "已创建 tag ${tag} → ${sha}"
+          fi
           echo "tag ${tag} exists without binaries — dispatching the release pipeline"
-          gh workflow run release.yml --ref "$GITHUB_DEFAULT_BRANCH" -f tag="$tag"
+          gh workflow run release.yml --ref "${{ github.event.repository.default_branch }}" -f tag="$tag"
 

@@ -135,7 +135,11 @@ jobs:
     env:
       UV_PYTHON_PREFERENCE: only-managed
     steps:
+      # 必须钉到被发布的那个提交:手动 dispatch 时 github.ref 是**分支**,不钉 ref 会拿
+      # 分支代码构建,再用 --clobber 覆盖正确产物(真踩过:2.2.0 的二进制自报 2.1.0)。
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -155,6 +159,20 @@ jobs:
             echo "::error::Binary links Python.framework (framework-mode PyInstaller, ~14s startup). Check pyproject.toml [tool.uv] python-preference = \"only-managed\"."
             exit 1
           fi
+      - name: Assert the binary reports the released version
+        # 最后一道防线:构建产物必须自报被发布的版本,否则说明构建用错了提交 ——
+        # 这种错会以「发出去的二进制版本不对」的形式静默进入用户手里。
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          out="$(./dist/orzmc* version)"
+          echo "$out"
+          case "$out" in
+            "orzmc ${TAG#v} "*|"orzmc ${TAG#v} "*) echo "ok: 自报版本与 $TAG 一致" ;;
+            *) echo "::error::二进制自报版本与发布 tag 不一致:期望 $TAG,得到 $out"; exit 1 ;;
+          esac
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
@@ -175,6 +193,8 @@ jobs:
     environment: release
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -210,8 +230,10 @@ jobs:
       contents: write
       actions: write # job 级 permissions 会覆盖工作流级,漏了它 gh workflow run 报 403
     steps:
-      # 同上:gh release / gh workflow run 都需要仓库上下文。
+      # 同上:gh release / gh workflow run 都需要仓库上下文,且要读被发布提交的内容。
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -226,4 +248,4 @@ jobs:
       - name: Redeploy the site so it advertises the new version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run pages.yml --ref "$GITHUB_DEFAULT_BRANCH"
+        run: gh workflow run pages.yml --ref "${{ github.event.repository.default_branch }}"

@@ -23,6 +23,7 @@ from orzmc.services.selfupdate import DOWNLOAD_BASE, asset_for
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "docs" / "index.html"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_PLEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release-please.yml"
 PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
 TAG_PLACEHOLDER = "__ORZMC_LATEST_TAG__"
 
@@ -103,7 +104,27 @@ def test_release_please_hands_off_to_the_release_pipeline() -> None:
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     please = (ROOT / ".github" / "workflows" / "release-please.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch" in release and "tag:" in release
-    assert 'gh workflow run release.yml --ref "$GITHUB_DEFAULT_BRANCH" -f tag="$tag"' in please
+    # release.yml 的每个 checkout 都必须钉到被发布的提交:手动 dispatch 时 github.ref 是
+    # 分支,不钉 ref 就会用分支代码构建、再用 --clobber 覆盖正确产物(真踩过:2.2.0 的
+    # 二进制自报 2.1.0)。
+    release_ref = "ref: ${{ inputs.tag || github.ref }}"
+    steps = re.findall(r"- uses: actions/checkout@v7\n?((?:        .*\n)*)", release)
+    assert steps, "release.yml 里找不到 checkout"
+    for body in steps:
+        assert release_ref in body, f"checkout 缺少 ref 钉死:\n{body}"
+    # 构建产物必须自报被发布的版本(最后一道防线)。
+    assert "./dist/orzmc* version" in release and "TAG#v" in release
+    # GITHUB_DEFAULT_BRANCH 不是 Actions 的默认环境变量(set -u 下 unbound,曾让这一步
+    # 静默失败);默认分支必须走上下文表达式。
+    default_branch = '--ref "${{ github.event.repository.default_branch }}"'
+    assert f'gh workflow run release.yml {default_branch} -f tag="$tag"' in please
+    assert f"gh workflow run pages.yml {default_branch}" in release
+    for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+        assert "GITHUB_DEFAULT_BRANCH" not in path.read_text(encoding="utf-8"), path.name
+    # 草稿 release 不创建 git tag(GitHub 只在发布时建 ref),而流水线要 checkout 它 ——
+    # 接力步骤必须先把 tag 按 target_commitish 建出来,否则 verify 直接 "tag not found"。
+    assert "git/refs" in please and "target_commitish" in please
+    assert please.index("git/refs") < please.index("gh workflow run release.yml")
     assert "actions: write" in please
     # release 可见性交给 release.yml 的收尾(publish),所以由 release-please 建 draft。
     config = json.loads((ROOT / "release-please-config.json").read_text(encoding="utf-8"))
