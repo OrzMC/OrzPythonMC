@@ -39,6 +39,25 @@ irm https://orzmc.github.io/OrzPythonMC/install.ps1 | iex
 - **独立二进制**:从 [Releases](https://github.com/OrzMC/OrzPythonMC/releases) 下载对应平台的二进制(`orzmc-macos-*` / `orzmc-linux-*` / `orzmc-windows-*`),解压后直接运行。官网页面会自动识别你的平台,给出对应下载链接。
 - **uv 用户**:`uv tool install orzmc-app`(卸载用 `uv tool uninstall orzmc-app`)
 
+## 发布与可信来源
+
+- **二进制**:每个平台的文件都是由 `release.yml` 在 GitHub Actions 上从对应 tag 现场构建的,构建后先自检 `orzmc version` 与 tag 一致(防止分支代码混进产物),再挂到该 Release。
+- **PyPI 包**:`orzmc` / `orzmc-app` 通过 **OIDC Trusted Publisher** 发布(仓库里不存在任何长期 API token),并且每个发行文件都附带 **PEP 740 产源证明(provenance)** —— 一份由 sigstore 签名的构建声明,用来证明「这个 wheel 确实由本仓库的那次 Actions 运行构建」。
+
+```bash
+# 1) 快速判断某个文件有没有产源证明(HTTP 200 = 有,404 = 无)
+curl -sI https://pypi.org/integrity/orzmc/2.4.0/orzmc-2.4.0-py3-none-any.whl/provenance
+
+# 2) 完整校验:连签名、构建仓库一起验(把版本号换成你要查的)
+uvx "pypi-attestations==0.0.30" verify pypi "pypi:orzmc-2.4.0-py3-none-any.whl" \
+  --repository https://github.com/OrzMC/OrzPythonMC
+# → OK: orzmc-2.4.0-py3-none-any.whl
+```
+
+`--repository` 填的是**构建产地仓库**(签名声明里的来源),不是发布者 —— 它必须与 provenance 里的值一致,否则校验会明确报 `provenance was signed by repository "X", expected "Y"`,这正是该校验的意义。`orzmc_app` 的同理(文件名换成 `orzmc_app-<版本>-py3-none-any.whl`)。
+
+Minecraft 游戏文件(Mojang / Adoptium / Fabric / Forge)的完整性则按各自官方的 SHA-1 校验:下载器在写入前比对官方清单,不匹配即拒绝(见下文「核心特性」)。
+
 ## 升级
 
 ```bash
