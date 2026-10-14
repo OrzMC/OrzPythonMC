@@ -42,6 +42,7 @@ def _release() -> dict[str, object]:
 
 def test_status_not_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # Windows 的 expanduser("~")
     installer = AppInstaller(http=FakeHttp(), reporter=FakeReporter())
     state = installer.status()
     assert state.installed is False
@@ -51,6 +52,7 @@ def test_status_not_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 def test_resolve_picks_newest_zip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     http = FakeHttp()
     http.json_responses[API_LATEST] = _release()
     tag, url = AppInstaller(http=http, reporter=FakeReporter()).resolve()
