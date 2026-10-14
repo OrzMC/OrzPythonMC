@@ -24,7 +24,9 @@ from typer.completion import install as install_completion
 from orzmc import (
     DEFAULT_DOWNLOAD_THREADS,
     MAX_DOWNLOAD_THREADS,
+    AppInstaller,
     GameType,
+    PluginService,
     RuntimeOptions,
     backup_world,
     check_self_update,
@@ -451,6 +453,124 @@ def backup(
     _emit({"version": resolved, "type": game_type, "destination": dest})
     if not _json_mode():
         _console.print(f"[success]备份完成:[/success] {dest}")
+
+
+@app.command()
+def plugin(
+    ctx: typer.Context,
+    search: Annotated[str | None, typer.Option("--search", "-s", help="按插件名称搜索 Hangar")] = None,
+    list_all: Annotated[bool, typer.Option("--list", "-l", help="列出默认服务器插件信息")] = False,
+    output: Annotated[str | None, typer.Option("--output", "-o", help="下载插件到该目录")] = None,
+    version: Annotated[str | None, typer.Option("--version", "-v", help="指定插件适配的游戏版本")] = None,
+    count: Annotated[int, typer.Option("--count", "-c", help="搜索结果最大数量, 默认 3")] = 3,
+) -> None:
+    """Hangar 搜索 / 下载服务端插件。"""
+    _begin("plugin", ctx)
+    service = PluginService(reporter=_reporter(ctx))
+    if search is not None:
+        results = service.search(search, count)
+        _emit({"mode": "search", "count": len(results), "results": [_project_json(p) for p in results]})
+        if not _json_mode():
+            if not results:
+                _console.print("[yellow]搜索无结果[/yellow]")
+            for project in results:
+                _console.print(_project_line(project))
+        return
+    if list_all and output is None:
+        found, not_found = service.list_all()
+        _emit({"mode": "list", "plugins": [p.get("name") for p in found], "notFound": not_found})
+        if not _json_mode():
+            for project in found:
+                _console.print(_project_line(project))
+            if not_found:
+                _console.print(f"[yellow]未获取插件信息: {', '.join(not_found)}[/yellow]")
+        return
+    if output is None:
+        _fail("未指定有效的插件下载目录路径 (--output)")
+    sink = _progress()
+    try:
+        files = PluginService(reporter=_reporter(ctx), sink=sink).download(output, version)
+    except Exception as exc:
+        _fail(str(exc), code="E_RUNTIME")
+    finally:
+        sink.close()
+    _emit({"mode": "download", "directory": output, "files": files})
+    if not _json_mode():
+        _console.print(f"[success]文件已下载到目录:[/success] {output}")
+
+
+def _project_json(project: dict[str, Any]) -> dict[str, Any]:
+    stats = project.get("stats") or {}
+    return {
+        "name": project.get("name"),
+        "description": project.get("description"),
+        "downloads": stats.get("downloads"),
+        "stars": stats.get("stars"),
+    }
+
+
+def _project_line(project: dict[str, Any]) -> str:
+    stats = project.get("stats") or {}
+    return f"{project.get('name')} — {project.get('description') or ''} (downloads={stats.get('downloads', 0)})"
+
+
+@app.command("app")
+def app_command(
+    ctx: typer.Context,
+    action: Annotated[str, typer.Argument(help="install|open|uninstall|status")],
+    channel: Annotated[str, typer.Option("--channel", help="release(默认)|appstore")] = "release",
+    version: Annotated[str | None, typer.Option("--version", "-v", help="指定应用版本(tag)")] = None,
+    yes: Yes = False,
+) -> None:
+    """跨面:安装 / 打开 / 卸载 GUI 应用(macOS)。"""
+    _begin("app", ctx)
+    if channel not in ("release", "appstore"):
+        _fail(f"未知渠道: {channel}(可选 release、appstore)")
+    installer = AppInstaller(reporter=_reporter(ctx))
+    action = action.lower()
+    if action == "status":
+        state = installer.status()
+        _emit({"installed": state.installed, "path": state.path, "version": state.version})
+        if not _json_mode():
+            if state.installed:
+                _console.print(f"[success]已安装:[/success] {state.path} ({state.version or '?'})")
+            else:
+                _console.print("未安装 OrzMC 应用")
+        return
+    if action == "open":
+        try:
+            installer.open()
+        except Exception as exc:
+            _fail(str(exc), code="E_RUNTIME")
+        _emit({"mode": "open", "path": installer.installed_path})
+        return
+    if action == "uninstall":
+        if not yes and is_interactive() and not Confirm.ask(f"卸载 {installer.installed_path}?", default=False):
+            _fail("已取消卸载", code="E_CANCELLED")
+        try:
+            removed = installer.uninstall()
+        except Exception as exc:
+            _fail(str(exc), code="E_RUNTIME")
+        _emit({"mode": "uninstall", "removed": removed})
+        if not _json_mode() and removed:
+            _console.print("[success]已卸载 OrzMC 应用[/success]")
+        return
+    if action == "install":
+        if channel == "appstore":
+            _fail("App Store 渠道尚未上架;请用 --channel release", code="E_UNSUPPORTED")
+        if not yes and is_interactive():
+            prompt = f"安装 OrzMC 到 {installer.applications_dir()}?"
+            if not Confirm.ask(prompt, default=True):
+                _fail("已取消安装", code="E_CANCELLED")
+        try:
+            path = installer.install(version)
+        except Exception as exc:
+            _fail(str(exc), code="E_RUNTIME")
+        _emit({"mode": "install", "path": path})
+        if not _json_mode():
+            _console.print(f"[success]已安装:[/success] {path}")
+        return
+    _fail(f"未知操作: {action}(可选 install|open|uninstall|status)")
 
 
 @app.command()
