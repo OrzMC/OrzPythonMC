@@ -36,7 +36,18 @@ def test_app_and_library_versions_match() -> None:
 def test_help_lists_all_commands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for name in ("client", "server", "remove", "update", "list", "backup", "version", "self-uninstall", "completion"):
+    for name in (
+        "client",
+        "server",
+        "remove",
+        "update",
+        "list",
+        "backup",
+        "version",
+        "self-uninstall",
+        "completion",
+        "capabilities",
+    ):
         assert name in result.stdout
 
 
@@ -108,6 +119,27 @@ def test_completion_json_envelope() -> None:
 def test_completion_rejects_unknown_shell() -> None:
     result = runner.invoke(app, ["completion", "tcsh"])
     assert result.exit_code == 1
+
+
+# ── capabilities(规范 §8)────────────────────────────────────────────────────
+
+
+def test_capabilities_json_envelope() -> None:
+    result = runner.invoke(app, ["--json", "capabilities"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    data = payload["data"]
+    names = {command["name"] for command in data["commands"]}
+    assert {"client", "server", "list", "capabilities"} <= names
+    assert any(entry["code"] == 130 for entry in data["exitCodes"])
+
+
+def test_capabilities_lists_options() -> None:
+    result = runner.invoke(app, ["--json", "capabilities"])
+    data = json.loads(result.stdout)["data"]
+    client = next(command for command in data["commands"] if command["name"] == "client")
+    assert any("--version" in opt["names"] for opt in client["options"])
 
 
 def test_client_rejects_server_type() -> None:

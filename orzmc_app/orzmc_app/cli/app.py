@@ -11,9 +11,10 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Annotated, NoReturn
+from typing import Annotated, Any, NoReturn, cast
 
 import typer
+import typer.main
 from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
@@ -405,8 +406,8 @@ def update(
         _console.print("[yellow]已取消升级[/yellow]")
 
 
-@app.command()
-def list(ctx: typer.Context, root_dir: RootDir = None) -> None:
+@app.command("list")
+def list_command(ctx: typer.Context, root_dir: RootDir = None) -> None:
     """列出已安装的版本(客户端 / 服务端类型)。"""
     _begin("list", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
@@ -467,6 +468,63 @@ def _prog_name(ctx: typer.Context) -> str:
 
 def _complete_var(ctx: typer.Context) -> str:
     return "_{}_COMPLETE".format(_prog_name(ctx).replace("-", "_").upper())
+
+
+def _jsonable(value: object) -> object:
+    return value if value is None or isinstance(value, (str, int, float, bool)) else str(value)
+
+
+def _capabilities_data() -> dict[str, object]:
+    """内省 Typer 应用,输出机器可读的命令 / 选项 / 退出码清单(规范 §8)。"""
+    group = cast(Any, typer.main.get_command(app))
+    commands: list[dict[str, object]] = []
+    for name in sorted(group.commands):
+        cmd = group.commands[name]
+        options: list[dict[str, object]] = []
+        for param in cmd.params:
+            names = [*getattr(param, "opts", []), *getattr(param, "secondary_opts", [])]
+            if not names:
+                continue
+            options.append(
+                {
+                    "names": names,
+                    "type": getattr(param.type, "name", None),
+                    "required": bool(getattr(param, "required", False)),
+                    "flag": bool(getattr(param, "is_flag", False)),
+                    "default": _jsonable(getattr(param, "default", None)),
+                    "help": getattr(param, "help", None),
+                }
+            )
+        first_line = (cmd.callback.__doc__ or "").strip().splitlines()
+        commands.append({"name": name, "help": first_line[0] if first_line else "", "options": options})
+    return {
+        "tool": "orzmc",
+        "version": APP_VERSION,
+        "libraryVersion": LIB_VERSION,
+        "exitCodes": [
+            {"code": 0, "meaning": "成功"},
+            {"code": 1, "meaning": "运行错误(错误信息写 stderr)"},
+            {"code": 130, "meaning": "用户取消(Ctrl-C / 拒绝确认)"},
+        ],
+        "envelope": {"ok": "bool", "command": "string", "data": "object|null", "error": "{code,message}|null"},
+        "commands": commands,
+    }
+
+
+@app.command()
+def capabilities(ctx: typer.Context) -> None:
+    """打印机器可读的能力清单(命令 / 选项 / 退出码;规范 §8)。"""
+    _begin("capabilities", ctx)
+    data = _capabilities_data()
+    _emit(data)
+    if not _json_mode():
+        cmds = data["commands"]
+        assert isinstance(cmds, list)
+        for command in cmds:
+            _console.print(f"[bold]{command['name']}[/bold] — {command['help']}")
+            for opt in command["options"]:
+                names = ", ".join(opt["names"]) or str(opt["type"])
+                _console.print(f"    {names}  {opt['help'] or ''}")
 
 
 @app.command()
