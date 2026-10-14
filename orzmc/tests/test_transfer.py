@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, ClassVar, Literal, cast
 
 import pytest
+import requests
 from fakes import FakeHttp, parse_range
 from requests.adapters import HTTPAdapter
 
@@ -47,6 +49,37 @@ class _RangeHandler(BaseHTTPRequestHandler):
         pass
 
 
+class _TruncatingHandler(BaseHTTPRequestHandler):
+    """首个请求声明完整长度却只写一半就断连;后续请求按 Range 返回剩余。"""
+
+    payload: ClassVar[bytes] = bytes(range(256)) * 64
+    truncated: ClassVar[bool] = False
+
+    def do_GET(self) -> None:
+        data = type(self).payload
+        rng = self.headers.get("Range")
+        if rng or type(self).truncated:
+            start, end = parse_range(rng or f"bytes=0-{len(data) - 1}", len(data))
+            body = data[start : end + 1]
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        # 首个请求:声明完整长度,只写一半后关连接(真实 socket 层的中途断连)
+        type(self).truncated = True
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data[: len(data) // 2])
+        self.wfile.flush()
+        self.close_connection = True
+
+    def log_message(self, *args: object) -> None:
+        pass
+
+
 @pytest.fixture
 def loopback_big_file() -> Any:
     """本机 loopback HTTP 服务(不碰外部网络),提供一个支持 Range 的大文件。"""
@@ -57,6 +90,20 @@ def loopback_big_file() -> Any:
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.fixture
+def loopback_truncating_file() -> Any:
+    """本机 loopback 服务:首个请求中途断连,之后支持 Range 续传。"""
+    _TruncatingHandler.truncated = False
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _TruncatingHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/f.bin"
+    finally:
+        server.shutdown()
+        server.server_close()
+        _TruncatingHandler.truncated = False
 
 
 class TestParseContentLength:
@@ -126,6 +173,70 @@ class _RecordingSession:
         return _StubResponse()
 
 
+class _FlakyResponse:
+    """可注入「读到一半掉线」的响应(模拟代理重置 / 丢包)。"""
+
+    def __init__(self, status: int, body: bytes, headers: dict[str, str], break_after: int | None) -> None:
+        self.status_code = status
+        self.headers = headers
+        self._body = body
+        self._break_after = break_after
+
+    def __enter__(self) -> _FlakyResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> Literal[False]:
+        return False
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def iter_content(self, chunk_size: int = 8192) -> Iterator[bytes]:
+        if self._break_after is None:
+            yield self._body
+            return
+        yield self._body[: self._break_after]
+        raise requests.exceptions.ChunkedEncodingError("Connection broken: IncompleteRead")
+
+
+class _FlakySession:
+    """首个请求按 ``break_after`` 掉线;后续按请求的 ``Range`` 返回剩余字节。
+
+    ``ignore_ranges=True`` 模拟服务器在续传时忽略 Range 回 200(必须整份重来);
+    ``always_break=True`` 模拟一直掉线(测重试预算耗尽后报错)。
+    记录每次请求的 Range 头,用来断言续传确实用了 ``Range: bytes=<已落盘>-``。
+    """
+
+    def __init__(
+        self, body: bytes, break_after: int | None = 4, *, ignore_ranges: bool = False, always_break: bool = False
+    ) -> None:
+        self.body = body
+        self.break_after = break_after
+        self.ignore_ranges = ignore_ranges
+        self.always_break = always_break
+        self.ranges: list[str | None] = []
+
+    def get(self, url: str, **kwargs: object) -> _FlakyResponse:
+        headers = kwargs.get("headers") or {}
+        rng = cast("dict[str, str]", headers).get("Range")
+        self.ranges.append(rng)
+        if rng and not self.ignore_ranges:
+            start, end = parse_range(rng, len(self.body))
+            payload = self.body[start : end + 1]
+            status = 206
+            hdrs = {"Content-Range": f"bytes {start}-{end}/{len(self.body)}", "Content-Length": str(len(payload))}
+        else:
+            payload = self.body
+            status = 200
+            hdrs = {"Content-Length": str(len(payload))}
+        if self.always_break:
+            break_after: int | None = max(1, len(payload) // 2)
+        else:
+            break_after = self.break_after
+            self.break_after = None  # 只掉一次线
+        return _FlakyResponse(status, payload, hdrs, break_after)
+
+
 class TestHttpClient:
     def test_pool_matches_the_requested_concurrency(self) -> None:
         # 回归:HTTPAdapter 默认 pool_maxsize=10 —— 并发高于它时 urllib3 会丢弃
@@ -165,6 +276,61 @@ class TestHttpClient:
         assert size == 5
         assert events == [("open", 5), ("chunk", 3), ("chunk", 2)]
         assert not (tmp_path / "f.bin.tmp").exists()
+
+
+class TestResumeAfterMidStreamBreak:
+    """urllib3 的 Retry 只覆盖建连,不覆盖 body 读取 —— 中途掉线必须自己续传。"""
+
+    def test_download_resumes_with_range_after_a_break(self, tmp_path) -> None:
+        body = bytes(range(256)) * 40  # 10240 字节
+        client = HttpClient()
+        session = _FlakySession(body, break_after=4096)
+        client._session = session  # type: ignore[assignment]
+        dest = tmp_path / "f.bin"
+        size = client.download("https://x/f.bin", str(dest))
+        assert size == len(body)
+        assert dest.read_bytes() == body
+        # 第一次无 Range(拿到总长度),续传从已落盘的 4096 起
+        assert session.ranges == [None, "bytes=4096-"]
+
+    def test_download_restarts_when_the_server_ignores_range(self, tmp_path) -> None:
+        body = b"abcdefghij"
+        client = HttpClient()
+        session = _FlakySession(body, break_after=3, ignore_ranges=True)
+        client._session = session  # type: ignore[assignment]
+        dest = tmp_path / "f.bin"
+        assert client.download("https://x/f.bin", str(dest)) == len(body)
+        assert dest.read_bytes() == body
+
+    def test_gives_up_after_the_attempt_budget(self, tmp_path) -> None:
+        client = HttpClient()
+        client._session = _FlakySession(b"x" * 100, always_break=True)  # type: ignore[assignment]
+        with pytest.raises(RuntimeError, match="多次断开"):
+            client.download("https://x/f.bin", str(tmp_path / "f.bin"))
+        assert not (tmp_path / "f.bin").exists()
+
+    def test_fetch_range_resumes_and_requires_206(self, tmp_path) -> None:
+        body = bytes(range(256)) * 40
+        client = HttpClient()
+        session = _FlakySession(body, break_after=100)
+        client._session = session  # type: ignore[assignment]
+        part = tmp_path / "f.part1"
+        size = client.fetch_range("https://x/f.bin", 1000, 2999, str(part))
+        assert size == 2000
+        assert part.read_bytes() == body[1000:3000]
+        assert session.ranges == ["bytes=1000-2999", "bytes=1100-2999"]
+
+    def test_fetch_range_rejects_a_200(self, tmp_path) -> None:
+        client = HttpClient()
+        client._session = _FlakySession(b"x" * 100, ignore_ranges=True)  # type: ignore[assignment]
+        with pytest.raises(RuntimeError, match="分块下载被拒绝"):
+            client.fetch_range("https://x/f.bin", 0, 9, str(tmp_path / "p"))
+
+    def test_download_resumes_over_a_truncated_connection(self, loopback_truncating_file, tmp_path) -> None:
+        dest = tmp_path / "f.bin"
+        size = HttpClient().download(loopback_truncating_file, str(dest))
+        assert size == len(_TruncatingHandler.payload)
+        assert dest.read_bytes() == _TruncatingHandler.payload
 
 
 # ── 大文件分块并行(批次 2)────────────────────────────────────────────────────
