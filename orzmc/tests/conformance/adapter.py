@@ -187,6 +187,32 @@ def op_resolve_version(g: dict[str, Any]) -> dict[str, Any]:
     return {"id": entry.id, "channel": entry.channel, "type": entry.type}
 
 
+def op_plan_server_deploy(g: dict[str, Any]) -> dict[str, Any]:
+    gtype = g.get("type", "vanilla")
+    if gtype != "vanilla":
+        _fail("E_UNSUPPORTED_OP", f"{gtype} 无离线部署计划")
+    snap = _load(g["snapshot"])
+    server = (snap.get("downloads") or {}).get("server")
+    if not server:
+        _fail("E_NO_SERVER_DOWNLOAD", "快照缺少服务端下载")
+    version = snap.get("id", g.get("version", ""))
+    lay = PathLayout(root=g["root"], version=version, game_type=gtype)
+    name = GameType.parse(gtype).server_jar_name(version)
+    return {
+        "version": version,
+        "type": gtype,
+        "workdir": _norm(lay.server_dir()),
+        "jarName": name,
+        "eula": True,
+        "coreArtifact": {
+            "url": server["url"],
+            "sha1": server.get("sha1"),
+            "size": server.get("size"),
+            "filename": name,
+        },
+    }
+
+
 def op_plan_download_concurrency(g: dict[str, Any]) -> dict[str, Any]:
     if g["sizeBytes"] >= PARALLEL_MIN_SIZE:
         return {"mode": "ranged", "parts": PARALLEL_PARTS}
@@ -271,6 +297,7 @@ OPS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "verifyArtifact": op_verify_artifact,
     "cacheDecision": op_cache_decision,
     "resolveVersion": op_resolve_version,
+    "planServerDeploy": op_plan_server_deploy,
     "planDownloadConcurrency": op_plan_download_concurrency,
     "resolveConcurrency": op_resolve_concurrency,
     "nonTtyDefaults": op_non_tty_defaults,
