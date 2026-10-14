@@ -36,7 +36,7 @@ def test_app_and_library_versions_match() -> None:
 def test_help_lists_all_commands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for name in ("client", "server", "remove", "update", "list", "backup", "version", "self-uninstall"):
+    for name in ("client", "server", "remove", "update", "list", "backup", "version", "self-uninstall", "completion"):
         assert name in result.stdout
 
 
@@ -84,6 +84,30 @@ def test_json_error_envelope_and_exit_code() -> None:
     assert payload["command"] == "client"
     assert payload["data"] is None
     assert payload["error"]["code"] == "E_UNSUPPORTED"
+
+
+# ── completion(规范 §9)──────────────────────────────────────────────────────
+
+
+def test_completion_script() -> None:
+    result = runner.invoke(app, ["completion", "bash"])
+    assert result.exit_code == 0
+    assert "COMPREPLY" in result.stdout
+    assert "complete_bash" in result.stdout
+
+
+def test_completion_json_envelope() -> None:
+    result = runner.invoke(app, ["--json", "completion", "zsh"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["data"]["shell"] == "zsh"
+    assert payload["data"]["script"]
+
+
+def test_completion_rejects_unknown_shell() -> None:
+    result = runner.invoke(app, ["completion", "tcsh"])
+    assert result.exit_code == 1
 
 
 def test_client_rejects_server_type() -> None:
