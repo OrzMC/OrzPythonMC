@@ -43,8 +43,8 @@ DownloadThreads = Annotated[
         ),
     ),
 ]
-MinMem = Annotated[str, typer.Option("--minmem", "-m", help="最小内存(如 512M)")]
-MaxMem = Annotated[str, typer.Option("--maxmem", "-x", help="最大内存(如 2G)")]
+MinMem = Annotated[str, typer.Option("--min-mem", "--minmem", "-m", help="最小内存(如 512M)")]
+MaxMem = Annotated[str, typer.Option("--max-mem", "--maxmem", "-x", help="最大内存(如 2G)")]
 JvmOpts = Annotated[str | None, typer.Option("--jvm-opts", help="附加 JVM 旗标(空格分隔,如 '-XX:+UseZGC')")]
 Verbose = Annotated[bool, typer.Option("--verbose", help="输出调试日志")]
 Yes = Annotated[bool, typer.Option("--yes", help="跳过交互确认(自动接受 EULA 等)")]
