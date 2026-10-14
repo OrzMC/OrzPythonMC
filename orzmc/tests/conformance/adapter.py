@@ -23,7 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn
 
-from orzmc.core.mojang import VersionEntry
+from orzmc.core.mojang import Mojang, VersionEntry
 from orzmc.domain.java import required_java_major
 from orzmc.domain.launch import DEFAULT_MAIN_CLASS, game_args, jvm_args, memory_args, user_jvm_opts
 from orzmc.domain.libraries import os_arch, os_key, resolve_libraries
@@ -188,6 +188,65 @@ def op_resolve_version(g: dict[str, Any]) -> dict[str, Any]:
     return {"id": entry.id, "channel": entry.channel, "type": entry.type}
 
 
+def op_plan_client_download(g: dict[str, Any]) -> dict[str, Any]:
+    gtype = g.get("type", "vanilla")
+    try:
+        gt = GameType.parse(gtype)
+    except ValueError:
+        _fail("E_UNSUPPORTED_TYPE", f"未知类型 {gtype}")
+    if not gt.is_client_capable:
+        _fail("E_UNSUPPORTED_TYPE", f"类型 {gtype} 不支持客户端")
+
+    vj = _load(g["snapshot"])
+    platform = g.get("platform") or {}
+    os_name = platform.get("os") or os_key()
+    arch = platform.get("arch") or os_arch()
+    lay = PathLayout(root=g["root"], version=g["version"], game_type=gtype)
+
+    items: list[dict[str, Any]] = []
+    client = (vj.get("downloads") or {}).get("client") or {}
+    if client.get("url"):
+        items.append(
+            {
+                "url": client["url"],
+                "path": _norm(lay.client_jar_path()),
+                "sha1": client.get("sha1"),
+                "size": client.get("size"),
+            }
+        )
+    index = vj.get("assetIndex") or {}
+    if index.get("url"):
+        index_path = os.path.join(lay.client_indexes_dir(), f"{index.get('id', '')}.json")
+        items.append(
+            {"url": index["url"], "path": _norm(index_path), "sha1": index.get("sha1"), "size": index.get("size")}
+        )
+    if g.get("assetIndex"):
+        objects = _load(g["assetIndex"]).get("objects") or {}
+        for meta in objects.values():
+            h = meta.get("hash")
+            if not h:
+                continue
+            items.append(
+                {
+                    "url": Mojang.assets_object_url(h),
+                    "path": _norm(lay.client_object_path(h)),
+                    "sha1": h,
+                    "size": meta.get("size"),
+                }
+            )
+    for lib in resolve_libraries(vj, os_name, arch):
+        if lib.url and lib.path:
+            items.append(
+                {
+                    "url": lib.url,
+                    "path": _norm(lay.client_library_path(lib.path)),
+                    "sha1": lib.sha1,
+                    "size": lib.size,
+                }
+            )
+    return {"items": items, "count": len(items)}
+
+
 def op_plan_server_launch(g: dict[str, Any]) -> dict[str, Any]:
     opts = g.get("options") or {}
     major = int(g.get("javaMajor") or 8)
@@ -338,6 +397,7 @@ OPS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "nonTtyDefaults": op_non_tty_defaults,
     "normalizeProgress": op_normalize_progress,
     "planClientLaunch": op_client_launch,
+    "planClientDownload": op_plan_client_download,
 }
 
 
