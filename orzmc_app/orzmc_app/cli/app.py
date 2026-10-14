@@ -17,6 +17,8 @@ import typer
 from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
+from typer.completion import get_completion_script
+from typer.completion import install as install_completion
 
 from orzmc import (
     DEFAULT_DOWNLOAD_THREADS,
@@ -53,9 +55,12 @@ from orzmc_app.cli.options import (
 from orzmc_app.cli.prompts import confirm_eula, confirm_java, is_interactive, resolve_username, resolve_version
 
 _console = Console(highlight=False)
-app = typer.Typer(add_completion=False, no_args_is_help=False, invoke_without_command=True)
+app = typer.Typer(add_completion=True, no_args_is_help=False, invoke_without_command=True)
 
 _MEM_RE = re.compile(r"^\d+[kKmMgGtT]$")
+
+# 规范 §9 支持的补全 shell。
+_COMPLETION_SHELLS = frozenset({"bash", "zsh", "fish", "powershell", "pwsh"})
 
 # 当前命令名 + 是否 `--json`(单一进程内单次调用;每次命令开头用 `_begin` 重设)。
 _STATE: dict[str, object] = {"json": False, "command": "_root"}
@@ -454,6 +459,39 @@ def version(ctx: typer.Context) -> None:
     _emit({"tool": APP_VERSION, "library": LIB_VERSION})
     if not _json_mode():
         _console.print(f"orzmc {APP_VERSION} (库 {LIB_VERSION})")
+
+
+def _prog_name(ctx: typer.Context) -> str:
+    return ctx.find_root().info_name or "orzmc"
+
+
+def _complete_var(ctx: typer.Context) -> str:
+    return "_{}_COMPLETE".format(_prog_name(ctx).replace("-", "_").upper())
+
+
+@app.command()
+def completion(
+    ctx: typer.Context,
+    target: Annotated[
+        str,
+        typer.Argument(help="bash|zsh|fish|powershell 打印补全脚本;install 写入 shell 补全目录"),
+    ],
+) -> None:
+    """生成 / 安装 Shell 补全(规范 §9)。"""
+    _begin("completion", ctx)
+    if target == "install":
+        shell, path = install_completion(prog_name=_prog_name(ctx))
+        _emit({"mode": "install", "shell": shell, "path": str(path)})
+        if not _json_mode():
+            _console.print(f"[success]已安装 {shell} 补全:[/success] {path}")
+        return
+    if target not in _COMPLETION_SHELLS:
+        _fail(f"不支持的 shell: {target}(可选: {', '.join(sorted(_COMPLETION_SHELLS))}, install)")
+    script = get_completion_script(prog_name=_prog_name(ctx), complete_var=_complete_var(ctx), shell=target)
+    if _json_mode():
+        _emit({"mode": "script", "shell": target, "script": script})
+    else:
+        sys.stdout.write(script + "\n")
 
 
 def _infer_backup_version(version: str | None, root_dir: str | None) -> str:
