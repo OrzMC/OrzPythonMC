@@ -540,3 +540,16 @@ def test_app_unknown_action(monkeypatch) -> None:
     monkeypatch.setattr(app_module, "AppInstaller", FakeInstaller)
     result = runner.invoke(app, ["app", "bogus"])
     assert result.exit_code == 1
+
+
+def test_fail_cancelled_exits_130() -> None:
+    """规范 §6: 用户取消 (E_CANCELLED) 退出码 130,其余 1。"""
+    import pytest
+
+    with pytest.raises(typer.Exit) as cancelled:
+        app_module._fail("已取消", code="E_CANCELLED")
+    assert cancelled.value.exit_code == 130
+
+    with pytest.raises(typer.Exit) as usage:
+        app_module._fail("参数错误", code="E_USAGE")
+    assert usage.value.exit_code == 1
