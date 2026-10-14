@@ -86,3 +86,13 @@ class TestProcessRunner:
         )
         _shutdown_after_interrupt(proc, FakeReporter())
         assert proc.poll() is not None
+
+
+def test_normalize_exit_code() -> None:
+    """POSIX 信号终止(返回 -N)归一为 128+N;非负原样(对齐 B7 / Swift)."""
+    from orzmc.infra.runner import normalize_exit_code
+
+    assert normalize_exit_code(0) == 0
+    assert normalize_exit_code(3) == 3
+    assert normalize_exit_code(-15) == 143
+    assert normalize_exit_code(-9) == 137

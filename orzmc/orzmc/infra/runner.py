@@ -20,6 +20,16 @@ _INTERRUPT_WAIT = 60.0  # seconds to wait for a graceful exit after Ctrl-C
 _INTERRUPT_KILL = 10.0  # seconds to wait after SIGTERM before SIGKILL
 
 
+def normalize_exit_code(return_code: int) -> int:
+    """POSIX wait status → 归一退出码: 被信号 N 杀死(返回 ``-N``) → ``128 + N``.
+
+    对齐 ``docs/spec/behavior.md`` B7 与 Swift ``ProcessRunner``: POSIX 下
+    ``subprocess.Popen.wait()`` 对信号终止返回负值,而规范要求归一为 ``128+signal``
+    (Windows 的 ``returncode`` 已是非负,原样返回).
+    """
+    return 128 + (-return_code) if return_code < 0 else return_code
+
+
 class ProcessRunner:
     """Run long-lived processes (java client/server) with streamed output."""
 
@@ -64,7 +74,7 @@ class ProcessRunner:
                 # mid-shutdown, then re-raise so the caller reports the cancel.
                 _shutdown_after_interrupt(proc, self._reporter, on_line)
                 raise
-        return proc.wait()
+        return normalize_exit_code(proc.wait())
 
     def run_detached(
         self,

@@ -34,6 +34,7 @@ from orzmc.infra.cache import MetadataCache
 from orzmc.infra.fs import FileStore
 from orzmc.infra.hashing import sha1_file
 from orzmc.infra.http import HttpClient
+from orzmc.infra.runner import normalize_exit_code
 from orzmc.infra.transfer import PARALLEL_MIN_SIZE, PARALLEL_PARTS
 
 _DEFAULT_FIXTURES = Path(__file__).resolve().parents[4] / "docs" / "spec" / "fixtures"
@@ -340,6 +341,11 @@ def op_normalize_progress(g: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def op_normalize_exit(g: dict[str, Any]) -> dict[str, Any]:
+    raw = int(g.get("returnCode", 0))
+    return {"exitCode": normalize_exit_code(raw), "signaled": raw < 0, "signal": -raw if raw < 0 else None}
+
+
 def op_client_launch(g: dict[str, Any]) -> dict[str, Any]:
     gtype = g.get("type", "vanilla")
     try:
@@ -396,6 +402,7 @@ OPS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "resolveConcurrency": op_resolve_concurrency,
     "nonTtyDefaults": op_non_tty_defaults,
     "normalizeProgress": op_normalize_progress,
+    "normalizeExit": op_normalize_exit,
     "planClientLaunch": op_client_launch,
     "planClientDownload": op_plan_client_download,
 }
