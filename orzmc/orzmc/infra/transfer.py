@@ -18,9 +18,7 @@ import os
 import shutil
 import threading
 import time
-from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any
 
 from orzmc.infra.http import HttpClient
 from orzmc.infra.progress import ProgressSink
@@ -112,15 +110,21 @@ def _download_ranged(
     tmp = f"{dest}.tmp"
     part_paths: list[str] = []
     try:
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with http.get(url, stream=True, timeout=timeout, headers={"Range": f"bytes=0-{_PROBE_SIZE - 1}"}) as resp:
-            total = _total_size(resp.status_code, resp.headers)
-            if resp.status_code != 206 or total is None:
-                return _stream_body(resp, dest, sink, desc, total)
-            sink.start_bytes(desc, total)
-            part_paths.append(f"{dest}.part0")
-            with open(part_paths[0], "wb") as f:
-                first_len = _copy_chunks(resp, f, sink.advance)
+        part_paths.append(f"{dest}.part0")
+        # 首块就地取,兼作「服务器是否支持 Range」探针;可续传(中途断连只补剩余)。
+        first_len, total, status = http.stream_range(
+            url,
+            0,
+            _PROBE_SIZE - 1,
+            part_paths[0],
+            on_chunk=sink.advance,
+            on_open=lambda size: sink.start_bytes(desc, size),
+            timeout=timeout,
+        )
+        if status != 206 or total is None:
+            # 服务器忽略 Range(代理/镜像):首块响应就是完整正文,直接落盘。
+            os.replace(part_paths[0], dest)
+            return first_len
 
         remaining = total - first_len
         if remaining > 0:
@@ -163,26 +167,6 @@ def _range_jobs(first_len: int, total: int, count: int) -> list[tuple[int, int]]
     return jobs
 
 
-def _total_size(status: int, headers: Mapping[str, str]) -> int | None:
-    """Resource size from a ``Content-Range`` (206) or ``Content-Length`` (200) response."""
-    if status == 206:
-        _, _, total = (headers.get("Content-Range") or "").partition("/")
-        return int(total) if total.isdigit() else None
-    value = headers.get("Content-Length")
-    return int(value) if value and value.isdigit() else None
-
-
-def _copy_chunks(resp: Any, out: Any, on_bytes: Callable[[int], None]) -> int:
-    """Write a response body to ``out``, reporting each chunk's size. Returns bytes written."""
-    written = 0
-    for chunk in resp.iter_content(chunk_size=_STREAM_CHUNK):
-        if chunk:
-            out.write(chunk)
-            written += len(chunk)
-            on_bytes(len(chunk))
-    return written
-
-
 def _pump(sink: ProgressSink, counter: _ByteCounter, futures: list[Future[None]]) -> None:
     """Feed progress to ``sink`` from the calling thread until every part is done."""
     while True:
@@ -202,24 +186,8 @@ def _fetch_range(
     counter: _ByteCounter,
     timeout: float | tuple[float, float] | None,
 ) -> None:
-    with http.get(url, stream=True, timeout=timeout, headers={"Range": f"bytes={start}-{end}"}) as resp:
-        if resp.status_code != 206:
-            raise RuntimeError(f"分块下载被拒绝 (HTTP {resp.status_code}): {url}")
-        with open(path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=_STREAM_CHUNK):
-                if chunk:
-                    f.write(chunk)
-                    counter.add(len(chunk))
-
-
-def _stream_body(resp: Any, dest: str, sink: ProgressSink, desc: str, total: int | None) -> int:
-    """Fallback: write an already-open response body to ``dest`` (Range was ignored)."""
-    sink.start_bytes(desc, total)
-    tmp = f"{dest}.tmp"
-    with open(tmp, "wb") as f:
-        written = _copy_chunks(resp, f, sink.advance)
-    os.replace(tmp, dest)
-    return written
+    """取一个分块到 ``path``;中途断连由 ``HttpClient.fetch_range`` 续传。"""
+    http.fetch_range(url, start, end, path, on_chunk=counter.add, timeout=timeout)
 
 
 def _assemble(part_paths: list[str], tmp: str) -> int:
