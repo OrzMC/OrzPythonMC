@@ -86,12 +86,20 @@ def _parse_type(value: str, *, client: bool) -> GameType:
 
 
 @app.callback(invoke_without_command=True)
-def root(ctx: typer.Context, verbose: Verbose = False) -> None:
+def root(
+    ctx: typer.Context,
+    verbose: Verbose = False,
+    root_dir: RootDir = None,
+    version: Annotated[bool, typer.Option("--version", help="打印工具版本并退出")] = False,
+) -> None:
     """OrzMC — Minecraft 客户端启动 / 服务端部署工具。
 
     不带子命令时打印帮助;直接使用子命令(如 ``orzmc client -v 26.2``)。
     """
-    ctx.obj = {"verbose": verbose}
+    if version:
+        _console.print(f"orzmc {APP_VERSION} (库 {LIB_VERSION})")
+        raise typer.Exit(0)
+    ctx.obj = {"verbose": verbose, "root_dir": root_dir}
     if ctx.invoked_subcommand is None:
         _console.print(ctx.get_help(), markup=False)
         raise typer.Exit(0)
@@ -112,6 +120,7 @@ def client(
     root_dir: RootDir = None,
 ) -> None:
     """运行 Minecraft 客户端(缺失文件自动下载即安装)。"""
+    root_dir = root_dir or ctx.obj.get("root_dir")
     game_type_obj = _parse_type(game_type, client=True)
     _check_mem("min", min_mem)
     _check_mem("max", max_mem)
@@ -162,6 +171,7 @@ def server(
     root_dir: RootDir = None,
 ) -> None:
     """部署并运行 Minecraft 服务端(缺失文件自动下载即安装)。"""
+    root_dir = root_dir or ctx.obj.get("root_dir")
     game_type_obj = _parse_type(game_type, client=False)
     _check_mem("min", min_mem)
     _check_mem("max", max_mem)
@@ -202,6 +212,7 @@ def server(
 
 @app.command()
 def remove(
+    ctx: typer.Context,
     version: Annotated[str, typer.Option("--version", "-v", help="要移除的 Minecraft 版本")],
     server: Annotated[bool, typer.Option("--server", help="移除服务端(默认移除客户端)")] = False,
     game_type: Annotated[str | None, typer.Option("--type", "-t", help="服务端类型(移除服务端时必填)")] = None,
@@ -209,6 +220,7 @@ def remove(
     root_dir: RootDir = None,
 ) -> None:
     """移除已安装的版本(客户端或某类型的服务端)。"""
+    root_dir = root_dir or ctx.obj.get("root_dir")
     if server and not game_type:
         _fail("移除服务端需要指定类型 (-t)")
     try:
@@ -249,6 +261,7 @@ def self_uninstall(
     ``orzmc`` 自身。游戏数据默认保留;``--remove-root`` 连 ``~/minecraft`` 一起删。
     """
     binary = str(Path(sys.argv[0]).resolve())
+    root_dir = root_dir or ctx.obj.get("root_dir")
     try:
         uninstall_self(
             binary,
@@ -321,8 +334,9 @@ def update(
 
 
 @app.command()
-def list(root_dir: RootDir = None) -> None:
+def list(ctx: typer.Context, root_dir: RootDir = None) -> None:
     """列出已安装的版本(客户端 / 服务端类型)。"""
+    root_dir = root_dir or ctx.obj.get("root_dir")
     items = list_versions(root_dir=root_dir)
     if not items:
         _console.print("[muted]尚未安装任何版本[/muted]")
@@ -338,11 +352,13 @@ def list(root_dir: RootDir = None) -> None:
 
 @app.command()
 def backup(
+    ctx: typer.Context,
     version: Annotated[str | None, typer.Option("--version", "-v", help="要备份的版本(缺省自动推断)")] = None,
     game_type: Annotated[str, typer.Option("--type", "-t", help="服务端类型")] = "vanilla",
     root_dir: RootDir = None,
 ) -> None:
     """备份服务端世界到 ``backup/worlds/``。"""
+    root_dir = root_dir or ctx.obj.get("root_dir")
     resolved = _infer_backup_version(version, root_dir)
     try:
         dest = backup_world(resolved, game_type=game_type, root_dir=root_dir)
