@@ -116,6 +116,7 @@ class FakeHttp(HttpClient):
         self.canned_archive: bytes | None = None
         self.canned: dict[str, bytes] = {}
         self.json_responses: dict[str, Any] = {}
+        self.text_responses: dict[str, str] = {}
         self.redirects: dict[str, str] = {}
         self.requests: list[tuple[str, str]] = []
         self.json_calls: list[str] = []
@@ -192,8 +193,12 @@ class FakeHttp(HttpClient):
             raise AssertionError(f"unexpected get_json: {url}")
         return value
 
-    def get_text(self, url: str, params: dict[str, str] | None = None):
-        raise AssertionError(f"unexpected get_text: {url}")
+    def get_text(self, url: str, params: dict[str, str] | None = None) -> str:
+        self.requests.append(("get_text", url))
+        value = _longest_match(url, self.text_responses)
+        if value is None:
+            raise AssertionError(f"unexpected get_text: {url}")
+        return value
 
 
 class FakeProcess(ProcessRunner):

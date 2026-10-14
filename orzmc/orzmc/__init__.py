@@ -20,9 +20,11 @@ from orzmc.infra.fs import FileStore
 from orzmc.infra.log import NullReporter, Reporter, RichReporter
 from orzmc.infra.progress import NullProgress, ProgressSink, RichProgress
 from orzmc.infra.runner import ProcessRunner
+from orzmc.services.app import AppInstaller, AppStatus
 from orzmc.services.backup import Backup
 from orzmc.services.client import ClientService
 from orzmc.services.context import AppContext, Services
+from orzmc.services.plugins import DEFAULT_PLUGINS, PluginService
 from orzmc.services.selfinstall import InstallManifest, SelfUninstaller
 from orzmc.services.selfupdate import SelfUpdater, UpdateCheck
 from orzmc.services.server import ServerService
@@ -33,9 +35,12 @@ __all__ = [
     "DEFAULT_DOWNLOAD_THREADS",
     "DEFAULT_JAVA_MAJOR",
     "DEFAULT_MAIN_CLASS",
+    "DEFAULT_PLUGINS",
     "DEFAULT_ROOT",
     "MAX_DOWNLOAD_THREADS",
     "AppContext",
+    "AppInstaller",
+    "AppStatus",
     "Backup",
     "ClientService",
     "FileStore",
@@ -46,6 +51,7 @@ __all__ = [
     "NullProgress",
     "NullReporter",
     "PathLayout",
+    "PluginService",
     "ProgressSink",
     # protocols & impls
     "Reporter",

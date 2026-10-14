@@ -47,6 +47,8 @@ def test_help_lists_all_commands() -> None:
         "self-uninstall",
         "completion",
         "capabilities",
+        "plugin",
+        "app",
     ):
         assert name in result.stdout
 
@@ -482,3 +484,59 @@ class TestForceUtf8Stdio:
         from orzmc_app.cli import _force_utf8_stdio
 
         _force_utf8_stdio()
+
+
+# ── plugin / app(离线:patch 公共 API 类)────────────────────────────────────
+
+
+def test_plugin_search_json(monkeypatch) -> None:
+    class FakeService:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def search(self, text: str, limit: int) -> list[dict[str, Any]]:
+            return [{"name": "LuckPerms", "description": "perms", "stats": {"downloads": 7, "stars": 1}}]
+
+    monkeypatch.setattr(app_module, "PluginService", FakeService)
+    result = runner.invoke(app, ["--json", "plugin", "--search", "luck"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["data"]["mode"] == "search"
+    assert payload["data"]["count"] == 1
+    assert payload["data"]["results"][0]["name"] == "LuckPerms"
+
+
+def test_plugin_requires_output() -> None:
+    result = runner.invoke(app, ["plugin"])
+    assert result.exit_code == 1
+
+
+def test_app_status_json(monkeypatch) -> None:
+    from orzmc import AppStatus
+
+    class FakeInstaller:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        installed_path = "/tmp/OrzMC.app"
+
+        def status(self) -> AppStatus:
+            return AppStatus(installed=False, path="/tmp/OrzMC.app", version=None)
+
+    monkeypatch.setattr(app_module, "AppInstaller", FakeInstaller)
+    result = runner.invoke(app, ["--json", "app", "status"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["data"]["installed"] is False
+
+
+def test_app_unknown_action(monkeypatch) -> None:
+    class FakeInstaller:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        installed_path = "/tmp/OrzMC.app"
+
+    monkeypatch.setattr(app_module, "AppInstaller", FakeInstaller)
+    result = runner.invoke(app, ["app", "bogus"])
+    assert result.exit_code == 1
