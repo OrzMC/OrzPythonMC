@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from typing import Any, cast
@@ -53,6 +54,36 @@ def test_list_shows_installed(tmp_path) -> None:
     assert result.exit_code == 0
     assert "1.20.4" in result.stdout
     assert "paper" in result.stdout
+
+
+# ── --json 信封(规范 §6.1)────────────────────────────────────────────────────
+
+
+def test_json_version_envelope() -> None:
+    result = runner.invoke(app, ["--json", "version"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "ok": True,
+        "command": "version",
+        "data": {"tool": __version__, "library": lib_version},
+        "error": None,
+    }
+
+
+def test_json_list_envelope(tmp_path) -> None:
+    result = runner.invoke(app, ["--json", "--root-dir", str(tmp_path), "list"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"ok": True, "command": "list", "data": {"versions": []}, "error": None}
+
+
+def test_json_error_envelope_and_exit_code() -> None:
+    result = runner.invoke(app, ["--json", "client", "-t", "paper", "--version", "1.20.4"])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["command"] == "client"
+    assert payload["data"] is None
+    assert payload["error"]["code"] == "E_UNSUPPORTED"
 
 
 def test_client_rejects_server_type() -> None:

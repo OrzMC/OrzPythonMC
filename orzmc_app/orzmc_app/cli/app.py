@@ -7,6 +7,7 @@ defaults to Mojang latest when neither ``-v`` nor a TTY prompt is available).
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -56,10 +57,55 @@ app = typer.Typer(add_completion=False, no_args_is_help=False, invoke_without_co
 
 _MEM_RE = re.compile(r"^\d+[kKmMgGtT]$")
 
+# 当前命令名 + 是否 `--json`(单一进程内单次调用;每次命令开头用 `_begin` 重设)。
+_STATE: dict[str, object] = {"json": False, "command": "_root"}
 
-def _fail(message: str) -> NoReturn:
-    _console.print(f"[error]错误:[/error] {message}")
+
+def _begin(command: str, ctx: typer.Context) -> None:
+    """记录当前命令与 `--json` 模式,供 `_fail` / `_emit` 使用。"""
+    _STATE["command"] = command
+    _STATE["json"] = bool((ctx.obj or {}).get("json"))
+
+
+def _json_mode() -> bool:
+    return bool(_STATE["json"])
+
+
+def _print_json(obj: object) -> None:
+    sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def _fail(message: str, *, code: str = "E_USAGE") -> NoReturn:
+    if _json_mode():
+        _print_json(
+            {
+                "ok": False,
+                "command": _STATE["command"],
+                "data": None,
+                "error": {"code": code, "message": message},
+            }
+        )
+    else:
+        _console.print(f"[error]错误:[/error] {message}")
     raise typer.Exit(1)
+
+
+def _emit(data: object) -> None:
+    """成功结果:`--json` 时输出信封(人类可读分支由调用方自己跳过)。"""
+    if _json_mode():
+        _print_json({"ok": True, "command": _STATE["command"], "data": data, "error": None})
+
+
+def _reporter(ctx: typer.Context) -> RichReporter:
+    """日志:`--json` 时写 stderr(stdout 只留信封),verbose 来自根回调。"""
+    console = Console(stderr=True) if _json_mode() else None
+    return RichReporter(console=console, verbose=bool((ctx.obj or {}).get("verbose")))
+
+
+def _progress() -> RichProgress:
+    """进度:`--json` 时写 stderr。"""
+    return RichProgress(console=Console(stderr=True) if _json_mode() else None)
 
 
 def _check_mem(name: str, value: str) -> None:
@@ -81,7 +127,7 @@ def _parse_type(value: str, *, client: bool) -> GameType:
         _fail(f"未知类型: {value}")
     ok = game_type.is_client_capable if client else game_type.is_server_capable
     if not ok:
-        _fail(f"类型 {value} 不能用于{'客户端' if client else '服务端'}")
+        _fail(f"类型 {value} 不能用于{'客户端' if client else '服务端'}", code="E_UNSUPPORTED")
     return game_type
 
 
@@ -90,6 +136,7 @@ def root(
     ctx: typer.Context,
     verbose: Verbose = False,
     root_dir: RootDir = None,
+    json_output: Annotated[bool, typer.Option("--json", help="机器可读输出(信封见规范 §6.1)")] = False,
     version: Annotated[bool, typer.Option("--version", help="打印工具版本并退出")] = False,
 ) -> None:
     """OrzMC — Minecraft 客户端启动 / 服务端部署工具。
@@ -97,9 +144,11 @@ def root(
     不带子命令时打印帮助;直接使用子命令(如 ``orzmc client -v 26.2``)。
     """
     if version:
-        _console.print(f"orzmc {APP_VERSION} (库 {LIB_VERSION})")
+        _print_json({"tool": APP_VERSION, "library": LIB_VERSION}) if json_output else _console.print(
+            f"orzmc {APP_VERSION} (库 {LIB_VERSION})"
+        )
         raise typer.Exit(0)
-    ctx.obj = {"verbose": verbose, "root_dir": root_dir}
+    ctx.obj = {"verbose": verbose, "root_dir": root_dir, "json": json_output}
     if ctx.invoked_subcommand is None:
         _console.print(ctx.get_help(), markup=False)
         raise typer.Exit(0)
@@ -120,6 +169,7 @@ def client(
     root_dir: RootDir = None,
 ) -> None:
     """运行 Minecraft 客户端(缺失文件自动下载即安装)。"""
+    _begin("client", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
     game_type_obj = _parse_type(game_type, client=True)
     _check_mem("min", min_mem)
@@ -140,14 +190,20 @@ def client(
         download_threads=download_threads,
         root_dir=root_dir,
     )
-    reporter = RichReporter(verbose=bool(ctx.obj.get("verbose")))
-    sink = RichProgress()
+    reporter = _reporter(ctx)
+    sink = _progress()
     try:
-        launch_client(options, reporter=reporter, sink=sink, confirm_java=confirm_java if is_interactive() else None)
+        code = launch_client(
+            options,
+            reporter=reporter,
+            sink=sink,
+            confirm_java=confirm_java if is_interactive() else None,
+        )
     except Exception as exc:
-        _fail(str(exc))
+        _fail(str(exc), code="E_RUNTIME")
     finally:
         sink.close()
+    _emit({"version": resolved, "username": username, "exitCode": code})
 
 
 @app.command()
@@ -171,6 +227,7 @@ def server(
     root_dir: RootDir = None,
 ) -> None:
     """部署并运行 Minecraft 服务端(缺失文件自动下载即安装)。"""
+    _begin("server", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
     game_type_obj = _parse_type(game_type, client=False)
     _check_mem("min", min_mem)
@@ -194,10 +251,10 @@ def server(
         download_threads=download_threads,
         root_dir=root_dir,
     )
-    reporter = RichReporter(verbose=bool(ctx.obj.get("verbose")))
-    sink = RichProgress()
+    reporter = _reporter(ctx)
+    sink = _progress()
     try:
-        deploy_server(
+        code = deploy_server(
             options,
             reporter=reporter,
             sink=sink,
@@ -205,9 +262,10 @@ def server(
             confirm_eula=confirm_eula if is_interactive() else None,
         )
     except Exception as exc:
-        _fail(str(exc))
+        _fail(str(exc), code="E_RUNTIME")
     finally:
         sink.close()
+    _emit({"version": resolved, "type": game_type_obj.value, "exitCode": code})
 
 
 @app.command()
@@ -220,6 +278,7 @@ def remove(
     root_dir: RootDir = None,
 ) -> None:
     """移除已安装的版本(客户端或某类型的服务端)。"""
+    _begin("remove", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
     if server and not game_type:
         _fail("移除服务端需要指定类型 (-t)")
@@ -238,11 +297,13 @@ def remove(
             ),
         )
     except Exception as exc:
-        _fail(str(exc))
-    if removed:
-        _console.print(f"[success]已移除 {version}[/success]")
-    else:
-        _console.print("[yellow]已取消移除[/yellow]")
+        _fail(str(exc), code="E_RUNTIME")
+    _emit({"version": version, "removed": removed})
+    if not _json_mode():
+        if removed:
+            _console.print(f"[success]已移除 {version}[/success]")
+        else:
+            _console.print("[yellow]已取消移除[/yellow]")
 
 
 @app.command("self-uninstall")
@@ -261,9 +322,10 @@ def self_uninstall(
     ``orzmc`` 自身。游戏数据默认保留;``--remove-root`` 连 ``~/minecraft`` 一起删。
     """
     binary = str(Path(sys.argv[0]).resolve())
+    _begin("self-uninstall", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
     try:
-        uninstall_self(
+        uninstalled = uninstall_self(
             binary,
             root_dir=root_dir,
             remove_root=remove_root,
@@ -276,7 +338,8 @@ def self_uninstall(
             ),
         )
     except Exception as exc:
-        _fail(str(exc))
+        _fail(str(exc), code="E_RUNTIME")
+    _emit({"uninstalled": uninstalled})
 
 
 @app.command()
@@ -297,20 +360,23 @@ def update(
     卸载请用 ``self-uninstall``,Minecraft 版本管理请用 ``list`` / ``remove``。
     """
     binary = str(Path(sys.argv[0]).resolve())
-    reporter = RichReporter(verbose=bool(ctx.obj.get("verbose")))
+    _begin("update", ctx)
+    reporter = _reporter(ctx)
     if check:
         try:
             current = check_self_update(binary, version=version, reporter=reporter)
         except Exception as exc:
-            _fail(str(exc))
-        _console.print(f"当前版本: [bold]{current.current}[/bold]")
-        _console.print(f"最新版本: [bold]{current.latest}[/bold]")
-        if current.available:
-            _console.print("[yellow]有新版本可用:orzmc update[/yellow]")
-        else:
-            _console.print("[success]已是最新版本[/success]")
+            _fail(str(exc), code="E_RUNTIME")
+        _emit({"mode": "check", "current": current.current, "latest": current.latest, "available": current.available})
+        if not _json_mode():
+            _console.print(f"当前版本: [bold]{current.current}[/bold]")
+            _console.print(f"最新版本: [bold]{current.latest}[/bold]")
+            if current.available:
+                _console.print("[yellow]有新版本可用:orzmc update[/yellow]")
+            else:
+                _console.print("[success]已是最新版本[/success]")
         return
-    sink = RichProgress()
+    sink = _progress()
     try:
         applied = update_self(
             binary,
@@ -326,18 +392,29 @@ def update(
             ),
         )
     except Exception as exc:
-        _fail(str(exc))
+        _fail(str(exc), code="E_RUNTIME")
     finally:
         sink.close()
-    if applied is None:
+    _emit({"mode": "update", "applied": applied is not None})
+    if applied is None and not _json_mode():
         _console.print("[yellow]已取消升级[/yellow]")
 
 
 @app.command()
 def list(ctx: typer.Context, root_dir: RootDir = None) -> None:
     """列出已安装的版本(客户端 / 服务端类型)。"""
+    _begin("list", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
     items = list_versions(root_dir=root_dir)
+    _emit(
+        {
+            "versions": [
+                {"version": item.version, "client": item.has_client, "servers": item.server_types} for item in items
+            ]
+        }
+    )
+    if _json_mode():
+        return
     if not items:
         _console.print("[muted]尚未安装任何版本[/muted]")
         return
@@ -358,19 +435,25 @@ def backup(
     root_dir: RootDir = None,
 ) -> None:
     """备份服务端世界到 ``backup/worlds/``。"""
+    _begin("backup", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
     resolved = _infer_backup_version(version, root_dir)
     try:
         dest = backup_world(resolved, game_type=game_type, root_dir=root_dir)
     except Exception as exc:
-        _fail(str(exc))
-    _console.print(f"[success]备份完成:[/success] {dest}")
+        _fail(str(exc), code="E_RUNTIME")
+    _emit({"version": resolved, "type": game_type, "destination": dest})
+    if not _json_mode():
+        _console.print(f"[success]备份完成:[/success] {dest}")
 
 
 @app.command()
-def version() -> None:
+def version(ctx: typer.Context) -> None:
     """打印工具版本。"""
-    _console.print(f"orzmc {APP_VERSION} (库 {LIB_VERSION})")
+    _begin("version", ctx)
+    _emit({"tool": APP_VERSION, "library": LIB_VERSION})
+    if not _json_mode():
+        _console.print(f"orzmc {APP_VERSION} (库 {LIB_VERSION})")
 
 
 def _infer_backup_version(version: str | None, root_dir: str | None) -> str:
