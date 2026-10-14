@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 import tempfile
 from collections.abc import Callable
@@ -24,7 +25,7 @@ from typing import Any, NoReturn
 
 from orzmc.core.mojang import VersionEntry
 from orzmc.domain.java import required_java_major
-from orzmc.domain.launch import DEFAULT_MAIN_CLASS, game_args, jvm_args
+from orzmc.domain.launch import DEFAULT_MAIN_CLASS, game_args, jvm_args, memory_args, user_jvm_opts
 from orzmc.domain.libraries import os_arch, os_key, resolve_libraries
 from orzmc.domain.options import MAX_DOWNLOAD_THREADS, RuntimeOptions
 from orzmc.domain.paths import PathLayout
@@ -187,6 +188,39 @@ def op_resolve_version(g: dict[str, Any]) -> dict[str, Any]:
     return {"id": entry.id, "channel": entry.channel, "type": entry.type}
 
 
+def op_plan_server_launch(g: dict[str, Any]) -> dict[str, Any]:
+    opts = g.get("options") or {}
+    major = int(g.get("javaMajor") or 8)
+    version = g.get("version") or ""
+    gtype = g.get("type", "vanilla")
+    lay = PathLayout(root=g["root"], version=version, game_type=gtype)
+    options = RuntimeOptions(
+        version=version,
+        game_type=gtype,
+        min_mem=opts.get("minMem") or "512M",
+        max_mem=opts.get("maxMem") or "2G",
+        jvm_opts=" ".join(opts.get("jvmOpts") or []) or None,
+        server_args=" ".join(opts.get("userServerArgs") or []) or None,
+        nogui=bool(opts.get("nogui")),
+        force_upgrade=bool(opts.get("forceUpgrade")),
+    )
+    jvm = user_jvm_opts(options) + memory_args(options)
+    user_args = shlex.split(options.server_args) if options.server_args else []
+    server_args: list[str] = []
+    if options.nogui and "nogui" not in user_args:
+        server_args.append("nogui")
+    server_args += user_args
+    if options.force_upgrade and "--forceUpgrade" not in server_args:
+        server_args.append("--forceUpgrade")
+    return {
+        "executable": _norm(lay.java_bin(major)),
+        "cwd": _norm(lay.server_dir()),
+        "jarPath": _norm(lay.server_jar_path()),
+        "jvmArgs": jvm,
+        "serverArgs": server_args,
+    }
+
+
 def op_plan_server_deploy(g: dict[str, Any]) -> dict[str, Any]:
     gtype = g.get("type", "vanilla")
     if gtype != "vanilla":
@@ -297,6 +331,7 @@ OPS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "verifyArtifact": op_verify_artifact,
     "cacheDecision": op_cache_decision,
     "resolveVersion": op_resolve_version,
+    "planServerLaunch": op_plan_server_launch,
     "planServerDeploy": op_plan_server_deploy,
     "planDownloadConcurrency": op_plan_download_concurrency,
     "resolveConcurrency": op_resolve_concurrency,
