@@ -96,7 +96,7 @@ def _fail(message: str, *, code: str = "E_USAGE") -> NoReturn:
         )
     else:
         _console.print(f"[error]错误:[/error] {message}")
-    raise typer.Exit(1)
+    raise typer.Exit(130 if code == "E_CANCELLED" else 1)
 
 
 def _emit(data: object) -> None:
