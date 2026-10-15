@@ -411,6 +411,7 @@ def update(
         str | None, typer.Option("--version", "-v", help="升级到指定版本(如 v2.1.0);缺省用 GitHub 最新发布")
     ] = None,
     check: Annotated[bool, typer.Option("--check", help="只检查是否有新版本,不下载")] = False,
+    channel: Annotated[str, typer.Option("--channel", help="更新渠道: release(默认)|beta")] = "release",
     file: Annotated[str | None, typer.Option("--file", help="用本地二进制升级(需同时 --version;离线/测试接缝)")] = None,
     yes: Annotated[bool, typer.Option("--yes", help="跳过升级确认")] = False,
     force: Annotated[bool, typer.Option("--force", help="绕过开发环境护栏(pip / venv 安装仍会被拒绝)")] = False,
@@ -422,11 +423,13 @@ def update(
     卸载请用 ``self-uninstall``,Minecraft 版本管理请用 ``list`` / ``remove``。
     """
     binary = str(Path(sys.argv[0]).resolve())
+    if channel not in ("release", "beta"):
+        _fail(f"未知更新渠道: {channel}(可选 release、beta)")
     _begin("update", ctx)
     reporter = _reporter(ctx)
     if check:
         try:
-            current = check_self_update(binary, version=version, reporter=reporter)
+            current = check_self_update(binary, version=version, channel=channel, reporter=reporter)
         except Exception as exc:
             _fail(str(exc), code="E_RUNTIME")
         _emit({"mode": "check", "current": current.current, "latest": current.latest, "available": current.available})
@@ -443,6 +446,7 @@ def update(
         applied = update_self(
             binary,
             version=version,
+            channel=channel,
             file=file,
             yes=yes,
             force=force,

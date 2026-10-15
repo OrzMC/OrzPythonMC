@@ -37,6 +37,7 @@ from orzmc.version import __version__
 
 REPO = "OrzMC/OrzPythonMC"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
+API_RELEASES = f"https://api.github.com/repos/{REPO}/releases"
 DOWNLOAD_BASE = f"https://github.com/{REPO}/releases/download"
 USER_AGENT = "orzmc-selfupdate"
 STAGING_NAME = ".orzmc-update.tmp"
@@ -242,13 +243,16 @@ class SelfUpdater:
         """
         return f"v{__version__}"
 
-    def check(self, version: str | None = None) -> UpdateCheck:
+    def check(self, version: str | None = None, channel: str = "release") -> UpdateCheck:
         """Resolve the upgrade target: explicit ``version`` or the latest release.
 
         An explicit version never calls the GitHub API, which also makes it the
         escape hatch when the API is rate-limited (60 requests/hour/IP).
+        ``channel="beta"`` prefers the newest (pre)release from the releases list.
         """
-        tag = normalize_tag(version) if version else self._latest_tag()
+        if channel not in ("release", "beta"):
+            raise RuntimeError(f"未知更新渠道: {channel}(可选 release、beta)")
+        tag = normalize_tag(version) if version else self._latest_tag(channel)
         current = self.current_version()
         return UpdateCheck(
             current=current,
@@ -259,13 +263,20 @@ class SelfUpdater:
             available=is_newer(tag, current),
         )
 
-    def _latest_tag(self) -> str:
+    def _latest_tag(self, channel: str = "release") -> str:
         """Latest release tag: GitHub API first, ``/releases/latest`` redirect as fallback.
+
+        ``channel="beta"`` walks the releases list (includes pre-releases) and
+        takes the newest; falls back to the stable latest release if unavailable.
 
         The REST API allows only 60 requests/hour/IP and CI runners (or users
         behind shared NAT) regularly hit that limit; the redirect endpoint is
         not rate limited, so a rate-limited install still resolves.
         """
+        if channel == "beta":
+            beta = self._latest_listed_tag()
+            if beta:
+                return beta
         try:
             data = self._http.get_json(API_LATEST, headers=api_headers())
         except Exception as exc:
@@ -281,12 +292,26 @@ class SelfUpdater:
             )
         return tag
 
+    def _latest_listed_tag(self) -> str | None:
+        """Newest tag from the releases list (includes pre-releases); ``None`` on failure."""
+        try:
+            data = self._http.get_json(f"{API_RELEASES}?per_page=10", headers=api_headers())
+        except Exception as exc:
+            self._reporter.debug(f"GitHub releases 列表不可用({exc})")
+            return None
+        if isinstance(data, list):
+            for release in data:
+                if isinstance(release, dict) and release.get("tag_name"):
+                    return str(release["tag_name"])
+        return None
+
     # ── update ──────────────────────────────────────────────────────────────
 
     def update(
         self,
         version: str | None = None,
         *,
+        channel: str = "release",
         file: str | None = None,
         yes: bool = False,
         force: bool = False,
@@ -298,12 +323,12 @@ class SelfUpdater:
         user declined, or the check with ``applied=False`` when the automatic
         path already runs the newest release. ``file`` installs a local binary
         instead of downloading one (offline / test seam) and requires
-        ``version`` to record what it is.
+        ``version`` to record what it is. ``channel`` selects release / beta.
         """
         if not self._binary:
             raise RuntimeError("无法确定当前二进制路径,请用 orzmc update 重新执行")
         self._guard(force)
-        check = self._target(version, file)
+        check = self._target(version, file, channel)
         if version is None and file is None and not check.available:
             if normalize_tag(check.current) != check.latest:
                 self._reporter.info(f"当前版本 {check.current} 比最新发布 {check.latest} 新,已跳过升级")
@@ -339,9 +364,9 @@ class SelfUpdater:
                 "确认无误可加 --force 继续"
             )
 
-    def _target(self, version: str | None, file: str | None) -> UpdateCheck:
+    def _target(self, version: str | None, file: str | None, channel: str = "release") -> UpdateCheck:
         if file is None:
-            return self.check(version)
+            return self.check(version, channel)
         local = os.path.abspath(os.path.expanduser(file))
         if not self._fs.is_file(local):
             raise RuntimeError(f"本地文件不存在: {local}")
