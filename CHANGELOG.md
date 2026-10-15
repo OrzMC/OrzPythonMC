@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.5.0...v2.6.0) (2026-10-15)
+
+
+### Features
+
+* 服务端 --print-jar-help（打印 jar 帮助） ([#47](https://github.com/OrzMC/OrzPythonMC/issues/47)) ([cfcda47](https://github.com/OrzMC/OrzPythonMC/commit/cfcda4797380ec6fb6c38161bdad5f3d3d00172c))
+
 ## [2.5.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.4.1...v2.5.0) (2026-10-15)
 
 
