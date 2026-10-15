@@ -45,11 +45,26 @@ class ServerService:
         cmd = self._build_server_command(java_bin)
 
         self._reporter.success(f"启动服务端 {version} ({gt.value})...")
-        if on_line is not None:
-            return self._services.process.run_stream(cmd, on_line=on_line, cwd=self._paths.server_dir())
-        return self._services.process.run_stream(
-            cmd, on_line=lambda line: self._reporter.plain(line), cwd=self._paths.server_dir()
-        )
+        # 记录 PID, 供 `orzmc server --kill-all` 终止(退出时清除).
+        holder: dict[str, str] = {}
+
+        def _on_start(pid: int) -> None:
+            holder["path"] = self._services.process_registry.register(pid, f"server-{version}-{gt.value}")
+
+        try:
+            if on_line is not None:
+                return self._services.process.run_stream(
+                    cmd, on_line=on_line, cwd=self._paths.server_dir(), on_start=_on_start
+                )
+            return self._services.process.run_stream(
+                cmd,
+                on_line=lambda line: self._reporter.plain(line),
+                cwd=self._paths.server_dir(),
+                on_start=_on_start,
+            )
+        finally:
+            if "path" in holder:
+                self._services.process_registry.unregister(holder["path"])
 
     # ── preparation ─────────────────────────────────────────────────────────
 

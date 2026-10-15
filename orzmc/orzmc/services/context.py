@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -13,6 +14,7 @@ from orzmc.infra.cache import MetadataCache
 from orzmc.infra.fs import FileStore
 from orzmc.infra.http import DEFAULT_POOL_SIZE, HttpClient
 from orzmc.infra.log import NullReporter, Reporter
+from orzmc.infra.process_registry import ProcessRegistry
 from orzmc.infra.progress import NullProgress, ProgressSink
 from orzmc.infra.runner import ProcessRunner
 from orzmc.infra.transfer import PARALLEL_PARTS
@@ -62,6 +64,7 @@ class Services:
         self.process = ProcessRunner(self.reporter)
         self.context = AppContext.build(options)
         paths = self.context.paths
+        self.process_registry = ProcessRegistry(self.fs, os.path.join(paths.root, "run"))
         self.downloader = Downloader(
             self.http, self.fs, self.reporter, self.sink, paths, workers=options.download_threads
         )

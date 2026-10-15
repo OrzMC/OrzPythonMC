@@ -19,8 +19,10 @@ macos_only = pytest.mark.skipif(sys.platform != "darwin", reason="GUI app 仅 ma
 class _ExtractingProcess(FakeProcess):
     """Fake ``ditto`` that materializes ``OrzMC.app`` inside the extract dir."""
 
-    def run_stream(self, cmd, on_line=None, cwd=None):
+    def run_stream(self, cmd, on_line=None, cwd=None, on_start=None):
         self.calls.append(list(cmd))
+        if on_start is not None:
+            on_start(4242)
         if cmd[0].endswith("ditto"):
             contents = os.path.join(cmd[-1], "OrzMC.app", "Contents")
             os.makedirs(contents, exist_ok=True)
