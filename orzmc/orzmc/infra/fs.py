@@ -5,7 +5,23 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 from typing import Any
+
+
+def default_state_dir() -> str:
+    """Per-user state dir (install manifest / auth token cache), platform-aware.
+
+    Honors ``XDG_STATE_HOME`` (Unix) / ``LOCALAPPDATA`` (Windows) so the
+    installer, ``self-uninstall`` and the auth token store agree on where
+    per-user state lives, and so CI can redirect state into a temp dir for a
+    hermetic run.
+    """
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    return os.path.join(base, "orzmc")
 
 
 class FileStore:
@@ -57,6 +73,28 @@ class FileStore:
 
     def write_json(self, path: str, obj: Any) -> None:
         self.write_text(path, json.dumps(obj, ensure_ascii=False, indent=2))
+
+    def write_text_atomic(self, path: str, content: str, mode: int | None = None, encoding: str = "utf-8") -> None:
+        """Atomically write ``content`` (tmp file + rename); optional POSIX ``mode``.
+
+        Used for secrets (auth tokens): never leaves a half-written file behind,
+        and ``mode=0o600`` keeps it private from other users.
+        """
+        directory = os.path.dirname(path) or "."
+        self.ensure_dir(directory)
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp-")
+        try:
+            with os.fdopen(fd, "w", encoding=encoding) as f:
+                f.write(content)
+            if mode is not None:
+                os.chmod(tmp, mode)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
 
     def remove(self, path: str) -> None:
         """Remove a file or directory tree; ignore when missing."""

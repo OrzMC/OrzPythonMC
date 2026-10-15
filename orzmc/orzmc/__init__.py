@@ -10,17 +10,21 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from orzmc.core.mojang import VersionEntry
+from orzmc.domain.auth import AuthSession, DeviceCode
 from orzmc.domain.java import DEFAULT_JAVA_MAJOR, required_java_major
 from orzmc.domain.launch import DEFAULT_MAIN_CLASS, build_launch_command, game_args, jvm_args
 from orzmc.domain.libraries import Library, resolve_libraries
 from orzmc.domain.options import DEFAULT_DOWNLOAD_THREADS, MAX_DOWNLOAD_THREADS, RuntimeOptions
 from orzmc.domain.paths import DEFAULT_ROOT, PathLayout
 from orzmc.domain.types import GameType
+from orzmc.infra.auth_store import AuthStore
 from orzmc.infra.fs import FileStore
+from orzmc.infra.http import HttpClient
 from orzmc.infra.log import NullReporter, Reporter, RichReporter
 from orzmc.infra.progress import NullProgress, ProgressSink, RichProgress
 from orzmc.infra.runner import ProcessRunner
 from orzmc.services.app import AppInstaller, AppStatus
+from orzmc.services.auth import Authenticator, AuthError
 from orzmc.services.backup import Backup
 from orzmc.services.client import ClientService
 from orzmc.services.context import AppContext, Services
@@ -41,6 +45,10 @@ __all__ = [
     "AppContext",
     "AppInstaller",
     "AppStatus",
+    "AuthError",
+    "AuthSession",
+    "AuthStore",
+    "Authenticator",
     "Backup",
     "ClientService",
     "FileStore",
@@ -68,6 +76,7 @@ __all__ = [
     "VersionManager",
     # versions
     "__version__",
+    "authenticate",
     "backup_world",
     "build_launch_command",
     "check_self_update",
@@ -105,6 +114,30 @@ def launch_client(
     if not version:
         raise RuntimeError("无法确定 Minecraft 版本")
     return ClientService(base.for_version(version)).run(confirm_java=confirm_java)
+
+
+def authenticate(
+    client_id: str,
+    *,
+    reporter: Reporter | None = None,
+    state_dir: str | None = None,
+    on_device_code: Callable[[DeviceCode], None] | None = None,
+    http: HttpClient | None = None,
+) -> AuthSession:
+    """Ensure a valid Microsoft/Xbox session (cache → refresh → device code).
+
+    ``on_device_code`` is called with the device code so the caller can show it
+    (the library never prints). ``state_dir`` overrides the token store location
+    (defaults to the per-user OrzMC state dir).
+    """
+    authenticator = Authenticator(
+        http or HttpClient(),
+        AuthStore(state_dir),
+        client_id,
+        reporter=reporter,
+        on_device_code=on_device_code,
+    )
+    return authenticator.ensure()
 
 
 def deploy_server(

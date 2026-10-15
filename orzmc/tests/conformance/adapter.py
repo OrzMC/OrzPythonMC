@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn
 
+from orzmc.core import auth as auth_map
 from orzmc.core.mojang import Mojang, VersionEntry
 from orzmc.domain.java import required_java_major
 from orzmc.domain.launch import DEFAULT_MAIN_CLASS, game_args, jvm_args, memory_args, user_jvm_opts
@@ -346,6 +347,78 @@ def op_normalize_exit(g: dict[str, Any]) -> dict[str, Any]:
     return {"exitCode": normalize_exit_code(raw), "signaled": raw < 0, "signal": -raw if raw < 0 else None}
 
 
+# -- auth(正版授权纯映射,见 docs/spec/auth.md)-------------------------------
+def op_auth_device_code_request(g: dict[str, Any]) -> dict[str, Any]:
+    req = auth_map.device_code_request(g["clientId"], g.get("scope") or auth_map.DEFAULT_SCOPE)
+    return {"method": req.method, "url": req.url, "form": dict(req.form or {})}
+
+
+def op_auth_device_code_result(g: dict[str, Any]) -> dict[str, Any]:
+    d = auth_map.device_code_result(g["response"])
+    return {
+        "deviceCode": d.device_code,
+        "userCode": d.user_code,
+        "verificationUri": d.verification_uri,
+        "expiresIn": d.expires_in,
+        "interval": d.interval,
+        "message": d.message,
+    }
+
+
+def op_auth_xbox_request(g: dict[str, Any]) -> dict[str, Any]:
+    req = auth_map.xbox_request(g["msaAccessToken"])
+    return {"method": req.method, "url": req.url, "headers": dict(req.headers), "body": req.body}
+
+
+def op_auth_xbox_result(g: dict[str, Any]) -> dict[str, Any]:
+    t = auth_map.xbox_result(g["response"])
+    return {"token": t.token, "userHash": t.user_hash}
+
+
+def op_auth_xsts_request(g: dict[str, Any]) -> dict[str, Any]:
+    req = auth_map.xsts_request(g["xblToken"], g.get("relyingParty") or auth_map.XSTS_RELYING_PARTY)
+    return {"method": req.method, "url": req.url, "headers": dict(req.headers), "body": req.body}
+
+
+def op_auth_xsts_result(g: dict[str, Any]) -> dict[str, Any]:
+    t = auth_map.xsts_result(g["response"])
+    return {"token": t.token, "userHash": t.user_hash}
+
+
+def op_auth_minecraft_login_request(g: dict[str, Any]) -> dict[str, Any]:
+    req = auth_map.minecraft_login_request(g["userHash"], g["xstsToken"])
+    return {"method": req.method, "url": req.url, "headers": dict(req.headers), "body": req.body}
+
+
+def op_auth_minecraft_login_result(g: dict[str, Any]) -> dict[str, Any]:
+    t = auth_map.minecraft_login_result(g["response"])
+    return {"accessToken": t.access_token, "expiresIn": t.expires_in}
+
+
+def op_auth_profile_request(g: dict[str, Any]) -> dict[str, Any]:
+    req = auth_map.profile_request(g["accessToken"])
+    return {"method": req.method, "url": req.url, "headers": dict(req.headers)}
+
+
+def op_auth_profile_result(g: dict[str, Any]) -> dict[str, Any]:
+    p = auth_map.profile_result(g["response"])
+    return {"uuid": p.uuid, "name": p.name}
+
+
+def op_auth_token_state(g: dict[str, Any]) -> dict[str, Any]:
+    st = auth_map.token_state(g["expiresAt"], g["now"], g.get("skewSeconds", auth_map.AUTH_SKEW_SECONDS))
+    return {"state": st.state, "remainingSeconds": st.remaining_seconds}
+
+
+def op_auth_classify_token_error(g: dict[str, Any]) -> dict[str, Any]:
+    a = auth_map.classify_token_error(g.get("error"))
+    return {"action": a.action, "code": a.code}
+
+
+def op_auth_classify_xsts_error(g: dict[str, Any]) -> dict[str, Any]:
+    return {"code": auth_map.classify_xsts_error(int(g.get("status") or 0), g.get("xerr"))}
+
+
 def op_client_launch(g: dict[str, Any]) -> dict[str, Any]:
     gtype = g.get("type", "vanilla")
     try:
@@ -403,6 +476,19 @@ OPS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "nonTtyDefaults": op_non_tty_defaults,
     "normalizeProgress": op_normalize_progress,
     "normalizeExit": op_normalize_exit,
+    "authDeviceCodeRequest": op_auth_device_code_request,
+    "authDeviceCodeResult": op_auth_device_code_result,
+    "authXboxRequest": op_auth_xbox_request,
+    "authXboxResult": op_auth_xbox_result,
+    "authXstsRequest": op_auth_xsts_request,
+    "authXstsResult": op_auth_xsts_result,
+    "authMinecraftLoginRequest": op_auth_minecraft_login_request,
+    "authMinecraftLoginResult": op_auth_minecraft_login_result,
+    "authProfileRequest": op_auth_profile_request,
+    "authProfileResult": op_auth_profile_result,
+    "authTokenState": op_auth_token_state,
+    "authClassifyTokenError": op_auth_classify_token_error,
+    "authClassifyXstsError": op_auth_classify_xsts_error,
     "planClientLaunch": op_client_launch,
     "planClientDownload": op_plan_client_download,
 }
