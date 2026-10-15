@@ -275,6 +275,9 @@ def server(
         bool, typer.Option("--nogui", help="无窗口模式启动(不弹服务端 GUI);终端输入 stop 或 Ctrl-C 关闭")
     ] = False,
     demo: Annotated[bool, typer.Option("--demo", help="演示模式启动(服务端加 --demo)")] = False,
+    print_jar_help: Annotated[
+        bool, typer.Option("--print-jar-help", help="打印服务端 jar 的帮助信息(服务端加 --help)")
+    ] = False,
     online_mode: Annotated[
         bool, typer.Option("--online-mode", "-o", help="正版验证(写入 server.properties online-mode)")
     ] = False,
@@ -304,6 +307,7 @@ def server(
         server_args=server_args,
         nogui=nogui,
         demo=demo,
+        print_jar_help=print_jar_help,
         online_mode=online_mode,
         refresh=refresh,
         download_threads=download_threads,

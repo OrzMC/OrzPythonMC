@@ -38,6 +38,7 @@ class RuntimeOptions:
     download_threads: int = DEFAULT_DOWNLOAD_THREADS
     symlink: bool = False
     demo: bool = False
+    print_jar_help: bool = False
     online_mode: bool = False
     jvm_opts: str | None = None
     server_args: str | None = None
