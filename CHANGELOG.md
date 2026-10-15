@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.6.0...v2.7.0) (2026-10-15)
+
+
+### Features
+
+* update --channel release|beta ([#49](https://github.com/OrzMC/OrzPythonMC/issues/49)) ([814722f](https://github.com/OrzMC/OrzPythonMC/commit/814722ffbd165e8cf0db6dfa7cc2fc0795ceb5b2))
+
 ## [2.6.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.5.0...v2.6.0) (2026-10-15)
 
 
