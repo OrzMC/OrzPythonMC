@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from orzmc.domain.paths import DEFAULT_ROOT
-from orzmc.infra.fs import FileStore
+from orzmc.infra.fs import FileStore, default_state_dir
 from orzmc.infra.log import NullReporter, Reporter
 
 MANIFEST_FILENAME = "install.conf"
@@ -69,20 +69,6 @@ def schedule_delete_on_reboot(path: str) -> bool:
         return bool(cast(Any, ctypes).windll.kernel32.MoveFileExW(path, None, MOVEFILE_DELAY_UNTIL_REBOOT))
     except Exception:
         return False
-
-
-def default_state_dir() -> str:
-    """Per-user state dir for the install manifest (platform-aware).
-
-    Honors ``XDG_STATE_HOME`` (Unix) / ``LOCALAPPDATA`` (Windows) so the
-    installer and ``self-uninstall`` agree on where the manifest lives, and so
-    CI can redirect state into a temp dir for a hermetic install→uninstall loop.
-    """
-    if os.name == "nt":
-        base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
-    else:
-        base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
-    return os.path.join(base, "orzmc")
 
 
 @dataclass(frozen=True)

@@ -117,7 +117,7 @@ def game_args(
     """
     os_name = os_name or os_key()
     arch = arch or os_arch()
-    auth_uuid = auth_uuid or str(uuid.uuid4())
+    auth_uuid = auth_uuid or options.auth_uuid or str(uuid.uuid4())
     index_id = str((version_json.get("assetIndex") or {}).get("id", "") or "")
     tokens = {
         "${auth_player_name}": options.username,
@@ -126,8 +126,8 @@ def game_args(
         "${assets_root}": paths.client_assets_dir(),
         "${assets_index_name}": index_id,
         "${auth_uuid}": auth_uuid,
-        "${auth_access_token}": "0",
-        "${user_type}": "legacy",
+        "${auth_access_token}": options.auth_access_token or "0",
+        "${user_type}": options.auth_user_type,
         "${version_type}": "release",
         "${user_properties}": "{}",
         "${resolution_width}": "854",
@@ -172,8 +172,8 @@ def _ensure_essential_args(
         ("--assetsDir", paths.client_assets_dir()),
         ("--assetIndex", index_id),
         ("--uuid", auth_uuid),
-        ("--accessToken", "0"),
-        ("--userType", "legacy"),
+        ("--accessToken", options.auth_access_token or "0"),
+        ("--userType", options.auth_user_type),
     ]
     present = set(args)
     for flag, value in essentials:

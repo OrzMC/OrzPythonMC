@@ -8,13 +8,13 @@ defaults to Mojang latest when neither ``-v`` nor a TTY prompt is available).
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
-from typing import Annotated, Any, NoReturn, cast
+from typing import Annotated, Any, NoReturn
 
 import typer
-import typer.main
 from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
@@ -25,9 +25,12 @@ from orzmc import (
     DEFAULT_DOWNLOAD_THREADS,
     MAX_DOWNLOAD_THREADS,
     AppInstaller,
+    AuthError,
+    AuthSession,
     GameType,
     PluginService,
     RuntimeOptions,
+    authenticate,
     backup_world,
     check_self_update,
     deploy_server,
@@ -43,6 +46,7 @@ from orzmc import (
 from orzmc.infra.log import RichReporter
 from orzmc.infra.progress import RichProgress
 from orzmc_app import __version__ as APP_VERSION
+from orzmc_app.cli.introspect import command_specs
 from orzmc_app.cli.options import (
     DownloadThreads,
     JvmOpts,
@@ -139,6 +143,14 @@ def _parse_type(value: str, *, client: bool) -> GameType:
     return game_type
 
 
+def _show_device_code(device: Any) -> None:
+    """Show device-code instructions on stderr (safe for --json / non-TTY)."""
+    sys.stderr.write(f"请在浏览器打开 {device.verification_uri} 并输入代码 {device.user_code}\n")
+    if device.message:
+        sys.stderr.write(f"{device.message}\n")
+    sys.stderr.flush()
+
+
 @app.callback(invoke_without_command=True)
 def root(
     ctx: typer.Context,
@@ -175,6 +187,9 @@ def client(
     refresh: Refresh = False,
     download_threads: DownloadThreads = DEFAULT_DOWNLOAD_THREADS,
     root_dir: RootDir = None,
+    auth: Annotated[
+        bool, typer.Option("--auth", help="正版授权(Microsoft 设备码流程;需 ORZMC_AZURE_CLIENT_ID)")
+    ] = False,
 ) -> None:
     """运行 Minecraft 客户端(缺失文件自动下载即安装)。"""
     _begin("client", ctx)
@@ -183,8 +198,24 @@ def client(
     _check_mem("min", min_mem)
     _check_mem("max", max_mem)
     download_threads = _check_threads(download_threads)
+
+    # 正版授权(可选):设备码 → Xbox/XSTS → MC 登录 → 档案;结果贯穿启动参数。
+    session: AuthSession | None = None
+    if auth:
+        client_id = os.environ.get("ORZMC_AZURE_CLIENT_ID", "").strip()
+        if not client_id:
+            _fail(
+                "未配置 Azure 应用 client_id(设置 ORZMC_AZURE_CLIENT_ID);见 docs/spec/auth.md",
+                code="E_AUTH_NOT_CONFIGURED",
+            )
+        try:
+            session = authenticate(client_id, reporter=_reporter(ctx), on_device_code=_show_device_code)
+        except AuthError as exc:
+            _fail(exc.message, code=exc.code)
+
     resolved = resolve_version(version, root_dir, refresh=refresh)
-    username = resolve_username(username)
+    # 认证成功以档案用户名为准(覆盖 -u);否则走交互/默认。
+    username = session.name if session is not None else resolve_username(username)
     options = RuntimeOptions(
         is_client=True,
         version=resolved,
@@ -197,6 +228,9 @@ def client(
         refresh=refresh,
         download_threads=download_threads,
         root_dir=root_dir,
+        auth_uuid=session.uuid if session is not None else None,
+        auth_access_token=session.access_token if session is not None else None,
+        auth_user_type="msa" if session is not None else "legacy",
     )
     reporter = _reporter(ctx)
     sink = _progress()
@@ -211,7 +245,17 @@ def client(
         _fail(str(exc), code="E_RUNTIME")
     finally:
         sink.close()
-    _emit({"version": resolved, "username": username, "exitCode": code})
+    result: dict[str, Any] = {"version": resolved, "username": username, "exitCode": code}
+    if session is not None:
+        result.update(
+            {
+                "authenticated": True,
+                "uuid": session.uuid,
+                "expiresAt": session.expires_at,
+                "source": session.source,
+            }
+        )
+    _emit(result)
 
 
 @app.command()
@@ -229,6 +273,10 @@ def server(
     server_args: Annotated[str | None, typer.Option("--server-args", help="服务端程序参数(如 '--port 25565')")] = None,
     nogui: Annotated[
         bool, typer.Option("--nogui", help="无窗口模式启动(不弹服务端 GUI);终端输入 stop 或 Ctrl-C 关闭")
+    ] = False,
+    demo: Annotated[bool, typer.Option("--demo", help="演示模式启动(服务端加 --demo)")] = False,
+    online_mode: Annotated[
+        bool, typer.Option("--online-mode", "-o", help="正版验证(写入 server.properties online-mode)")
     ] = False,
     refresh: Refresh = False,
     download_threads: DownloadThreads = DEFAULT_DOWNLOAD_THREADS,
@@ -255,6 +303,8 @@ def server(
         jvm_opts=jvm_opts,
         server_args=server_args,
         nogui=nogui,
+        demo=demo,
+        online_mode=online_mode,
         refresh=refresh,
         download_threads=download_threads,
         root_dir=root_dir,
@@ -590,33 +640,8 @@ def _complete_var(ctx: typer.Context) -> str:
     return "_{}_COMPLETE".format(_prog_name(ctx).replace("-", "_").upper())
 
 
-def _jsonable(value: object) -> object:
-    return value if value is None or isinstance(value, (str, int, float, bool)) else str(value)
-
-
 def _capabilities_data() -> dict[str, object]:
-    """内省 Typer 应用,输出机器可读的命令 / 选项 / 退出码清单(规范 §8)。"""
-    group = cast(Any, typer.main.get_command(app))
-    commands: list[dict[str, object]] = []
-    for name in sorted(group.commands):
-        cmd = group.commands[name]
-        options: list[dict[str, object]] = []
-        for param in cmd.params:
-            names = [*getattr(param, "opts", []), *getattr(param, "secondary_opts", [])]
-            if not names:
-                continue
-            options.append(
-                {
-                    "names": names,
-                    "type": getattr(param.type, "name", None),
-                    "required": bool(getattr(param, "required", False)),
-                    "flag": bool(getattr(param, "is_flag", False)),
-                    "default": _jsonable(getattr(param, "default", None)),
-                    "help": getattr(param, "help", None),
-                }
-            )
-        first_line = (cmd.callback.__doc__ or "").strip().splitlines()
-        commands.append({"name": name, "help": first_line[0] if first_line else "", "options": options})
+    """机器可读的命令 / 选项 / 退出码清单(规范 §8;内省见 ``introspect``)。"""
     return {
         "tool": "orzmc",
         "version": APP_VERSION,
@@ -627,7 +652,7 @@ def _capabilities_data() -> dict[str, object]:
             {"code": 130, "meaning": "用户取消(Ctrl-C / 拒绝确认)"},
         ],
         "envelope": {"ok": "bool", "command": "string", "data": "object|null", "error": "{code,message}|null"},
-        "commands": commands,
+        "commands": command_specs(app),
     }
 
 
@@ -645,6 +670,16 @@ def capabilities(ctx: typer.Context) -> None:
             for opt in command["options"]:
                 names = ", ".join(opt["names"]) or str(opt["type"])
                 _console.print(f"    {names}  {opt['help'] or ''}")
+
+
+@app.command()
+def mcp(ctx: typer.Context) -> None:
+    """本地 MCP server(stdio JSON-RPC 2.0;规范 §8.2)。"""
+    _begin("mcp", ctx)
+    # 延迟 import:``mcp`` 模块复用本模块的 Typer 应用,顶层 import 会成环。
+    from orzmc_app.cli.mcp import serve
+
+    serve(app)
 
 
 @app.command()

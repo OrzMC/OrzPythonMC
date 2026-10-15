@@ -111,7 +111,7 @@ class ServerService:
         content = self._fs.read_text(path) if self._fs.is_file(path) else ""
         additions: list[str] = []
         if "online-mode" not in content:
-            additions.append("online-mode=false")
+            additions.append("online-mode=true" if self._options.online_mode else "online-mode=false")
         if "server-ip" not in content:
             additions.append("server-ip=")
         if additions:
@@ -135,6 +135,8 @@ class ServerService:
         if self._options.nogui and "nogui" not in user_args:
             cmd.append("nogui")
         cmd += user_args
+        if self._options.demo and "--demo" not in cmd:
+            cmd.append("--demo")
         if self._options.force_upgrade and "--forceUpgrade" not in cmd:
             cmd.append("--forceUpgrade")
         return cmd

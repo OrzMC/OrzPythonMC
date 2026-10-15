@@ -7,6 +7,7 @@ them directly. The tests directory is on ``sys.path`` under pytest's default
 
 from __future__ import annotations
 
+import json as _json
 import os
 from collections.abc import Callable, Iterator
 from types import SimpleNamespace
@@ -88,6 +89,9 @@ class FakeResponse:
         if self.status_code >= 400:
             raise AssertionError(f"HTTP {self.status_code}")
 
+    def json(self) -> Any:
+        return _json.loads(self._body.decode("utf-8"))
+
     def iter_content(self, chunk_size: int = 8192) -> Iterator[bytes]:
         for start in range(0, len(self._body), chunk_size):
             yield self._body[start : start + chunk_size]
@@ -128,11 +132,31 @@ class FakeHttp(HttpClient):
         # Range 请求记录 + 是否假装服务器不支持 Range(测分块回退)。
         self.range_requests: list[str] = []
         self.ignore_ranges = False
+        # 认证(``--auth``) API:URL 子串 → ``(status, JSON payload)``;记录全部请求。
+        self.api_responses: dict[str, tuple[int, Any]] = {}
+        self.api_requests: list[dict[str, Any]] = []
 
     def head_location(self, url: str) -> str | None:
         """Seeded 302 target for the rate-limit-proof fallback resolver."""
         self.requests.append(("head_location", url))
         return _longest_match(url, self.redirects)
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        data: Any = None,
+        json: Any = None,
+        headers: dict[str, str] | None = None,
+        timeout: Any = None,
+    ) -> Any:
+        """Serve a seeded ``(status, payload)`` for auth API calls (never network)."""
+        self.api_requests.append({"method": method, "url": url, "data": data, "json": json, "headers": headers})
+        hit = _longest_match(url, self.api_responses)
+        status, payload = hit if hit is not None else (404, {"error": "not_found"})
+        return FakeResponse(status, _json.dumps(payload).encode("utf-8"), {"Content-Type": "application/json"})
 
     def get(self, url: str, params=None, headers=None, stream=False, timeout=None) -> Any:
         """Serve ``canned`` bytes, honoring ``Range`` unless ``ignore_ranges`` is set.

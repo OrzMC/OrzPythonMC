@@ -101,6 +101,33 @@ class HttpClient:
         resp.raise_for_status()
         return resp
 
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        json: Any = None,
+        headers: dict[str, str] | None = None,
+        timeout: float | tuple[float, float] | None = None,
+    ) -> requests.Response:
+        """Send an HTTP request **without** raising on 4xx/5xx.
+
+        Used by the auth flow: those endpoints put structured errors in the body
+        (and a 401 on ``/minecraft/profile`` means "no game ownership", not a
+        transport failure), so the caller inspects ``status_code`` itself.
+        """
+        return self._session.request(
+            method,
+            url,
+            params=params,
+            data=data,
+            json=json,
+            headers=headers,
+            timeout=self._timeout if timeout is None else timeout,
+        )
+
     def get_json(self, url: str, params: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Any:
         return self.get(url, params=params, headers=headers).json()
 

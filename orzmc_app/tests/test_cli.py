@@ -553,3 +553,20 @@ def test_fail_cancelled_exits_130() -> None:
     with pytest.raises(typer.Exit) as usage:
         app_module._fail("参数错误", code="E_USAGE")
     assert usage.value.exit_code == 1
+
+
+def test_client_auth_without_client_id(monkeypatch) -> None:
+    """`--auth` 缺 `ORZMC_AZURE_CLIENT_ID` → E_AUTH_NOT_CONFIGURED(不联网)。"""
+    monkeypatch.delenv("ORZMC_AZURE_CLIENT_ID", raising=False)
+    result = runner.invoke(app, ["client", "--auth"])
+    assert result.exit_code == 1
+    assert "client_id" in result.stdout
+
+
+def test_client_auth_without_client_id_json(monkeypatch) -> None:
+    monkeypatch.delenv("ORZMC_AZURE_CLIENT_ID", raising=False)
+    result = runner.invoke(app, ["--json", "client", "--auth"])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "E_AUTH_NOT_CONFIGURED"
