@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.7.0...v2.8.0) (2026-10-15)
+
+
+### Features
+
+* server --kill-all（进程注册与终止） ([#51](https://github.com/OrzMC/OrzPythonMC/issues/51)) ([de4c213](https://github.com/OrzMC/OrzPythonMC/commit/de4c2137d0c13157b5ed59a6e13cf1a97b4e76c0))
+
 ## [2.7.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.6.0...v2.7.0) (2026-10-15)
 
 
