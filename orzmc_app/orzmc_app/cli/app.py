@@ -8,7 +8,6 @@ defaults to Mojang latest when neither ``-v`` nor a TTY prompt is available).
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -38,6 +37,7 @@ from orzmc import (
     launch_client,
     list_versions,
     remove_version,
+    resolve_client_id,
     uninstall_self,
     update_self,
 )
@@ -203,7 +203,7 @@ def client(
     # 正版授权(可选):设备码 → Xbox/XSTS → MC 登录 → 档案;结果贯穿启动参数。
     session: AuthSession | None = None
     if auth:
-        client_id = os.environ.get("ORZMC_AZURE_CLIENT_ID", "").strip()
+        client_id = resolve_client_id()
         if not client_id:
             _fail(
                 "未配置 Azure 应用 client_id(设置 ORZMC_AZURE_CLIENT_ID);见 docs/spec/auth.md",
