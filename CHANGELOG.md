@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.8.0...v2.9.0) (2026-10-15)
+
+
+### Features
+
+* **auth:** 内置 Azure 应用 client_id（公共客户端） ([#54](https://github.com/OrzMC/OrzPythonMC/issues/54)) ([ef09e0b](https://github.com/OrzMC/OrzPythonMC/commit/ef09e0b7fa2d5054aa9a66744266356a8402131f))
+
 ## [2.8.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.7.0...v2.8.0) (2026-10-15)
 
 
