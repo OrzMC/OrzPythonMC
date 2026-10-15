@@ -285,7 +285,7 @@ class TestUpdateCommand:
     def test_check_reports_both_versions(self, monkeypatch) -> None:
         seen: list[tuple] = []
 
-        def fake_check(binary, version=None, reporter=None):
+        def fake_check(binary, version=None, channel=None, reporter=None):
             seen.append((binary, version))
             return UpdateCheck(
                 current="v1.0.0", latest="v2.0.0", asset="orzmc-x", platform="linux-x86_64", available=True
@@ -302,7 +302,7 @@ class TestUpdateCommand:
         monkeypatch.setattr(
             app_module,
             "check_self_update",
-            lambda binary, version=None, reporter=None: UpdateCheck(
+            lambda binary, version=None, channel=None, reporter=None: UpdateCheck(
                 current="v2.0.0", latest="v2.0.0", asset="orzmc-x", platform="linux-x86_64", available=False
             ),
         )
@@ -344,7 +344,7 @@ class TestUpdateCommand:
         assert "检测到 pip 安装" in result.stdout
 
     def test_check_error_exits_nonzero(self, monkeypatch) -> None:
-        def boom(binary, version=None, reporter=None):
+        def boom(binary, version=None, channel=None, reporter=None):
             raise RuntimeError("GitHub API 已限流")
 
         monkeypatch.setattr(app_module, "check_self_update", boom)

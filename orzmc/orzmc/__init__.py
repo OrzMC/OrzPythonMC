@@ -224,20 +224,23 @@ def check_self_update(
     binary: str | None = None,
     *,
     version: str | None = None,
+    channel: str = "release",
     reporter: Reporter | None = None,
 ) -> UpdateCheck:
     """Resolve the current upgrade target for the tool itself; installs nothing.
 
     Without ``version`` the latest GitHub Release is looked up (subject to the
     unauthenticated API rate limit); with it no API call happens at all.
+    ``channel="beta"`` prefers the newest pre-release.
     """
-    return SelfUpdater(reporter=reporter, binary=binary).check(version)
+    return SelfUpdater(reporter=reporter, binary=binary).check(version, channel)
 
 
 def update_self(
     binary: str,
     *,
     version: str | None = None,
+    channel: str = "release",
     file: str | None = None,
     yes: bool = False,
     force: bool = False,
@@ -255,10 +258,10 @@ def update_self(
     so a returned ``applied=True`` means "staged and handed off". Returns
     ``None`` when the user declined, or a check with ``applied=False`` when
     already up to date. ``confirm`` is consulted before the hand-off unless
-    ``yes`` is set.
+    ``yes`` is set. ``channel`` selects release / beta.
     """
     return SelfUpdater(reporter=reporter, sink=sink, process=process, binary=binary).update(
-        version, file=file, yes=yes, force=force, confirm=confirm
+        version, channel=channel, file=file, yes=yes, force=force, confirm=confirm
     )
 
 
