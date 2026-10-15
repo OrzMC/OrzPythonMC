@@ -556,15 +556,15 @@ def test_fail_cancelled_exits_130() -> None:
 
 
 def test_client_auth_without_client_id(monkeypatch) -> None:
-    """`--auth` 缺 `ORZMC_AZURE_CLIENT_ID` → E_AUTH_NOT_CONFIGURED(不联网)。"""
-    monkeypatch.delenv("ORZMC_AZURE_CLIENT_ID", raising=False)
+    """`--auth` 无 client_id(未内置且未设环境变量)→ E_AUTH_NOT_CONFIGURED(不联网)。"""
+    monkeypatch.setattr(app_module, "resolve_client_id", lambda override=None: "")
     result = runner.invoke(app, ["client", "--auth"])
     assert result.exit_code == 1
     assert "client_id" in result.stdout
 
 
 def test_client_auth_without_client_id_json(monkeypatch) -> None:
-    monkeypatch.delenv("ORZMC_AZURE_CLIENT_ID", raising=False)
+    monkeypatch.setattr(app_module, "resolve_client_id", lambda override=None: "")
     result = runner.invoke(app, ["--json", "client", "--auth"])
     assert result.exit_code == 1
     payload = json.loads(result.stdout.strip().splitlines()[-1])
