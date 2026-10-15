@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.5.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.4.1...v2.5.0) (2026-10-15)
+
+
+### Features
+
+* **cli:** capabilities 命令（机器可读能力清单） ([#41](https://github.com/OrzMC/OrzPythonMC/issues/41)) ([b6886fb](https://github.com/OrzMC/OrzPythonMC/commit/b6886fbb8c95a674b1cb3e883a19e4854f45dcc4))
+* **cli:** completion 命令（生成/安装 Shell 补全） ([#40](https://github.com/OrzMC/OrzPythonMC/issues/40)) ([051857a](https://github.com/OrzMC/OrzPythonMC/commit/051857ad9b752d911c75f95acb4b4fb6ca51b105))
+* **cli:** 全局 --json 机器可读信封 ([#39](https://github.com/OrzMC/OrzPythonMC/issues/39)) ([c49b1d2](https://github.com/OrzMC/OrzPythonMC/commit/c49b1d2c28be7a14a44dab8d139a7fcbd0c09355))
+* **cli:** 全局 --version/--root-dir + 内存选项规范名（保留旧别名） ([#38](https://github.com/OrzMC/OrzPythonMC/issues/38)) ([b4c8dab](https://github.com/OrzMC/OrzPythonMC/commit/b4c8dabcbee5197cd249e9f47271f01241af3bb9))
+* **cli:** 新增 plugin 与 app 命令 ([#42](https://github.com/OrzMC/OrzPythonMC/issues/42)) ([11a423a](https://github.com/OrzMC/OrzPythonMC/commit/11a423a7cceb5b23beea8dbd646a871b937ac534))
+* 正版授权离线链路 + orzmc mcp server + 服务端选项 ([#46](https://github.com/OrzMC/OrzPythonMC/issues/46)) ([969cd05](https://github.com/OrzMC/OrzPythonMC/commit/969cd051f3de819ab44645b67d4d14a3aa4ecd88))
+
+
+### Bug Fixes
+
+* **cli:** 用户取消(E_CANCELLED)退出码改为 130(规范 §6) ([#43](https://github.com/OrzMC/OrzPythonMC/issues/43)) ([e4c999a](https://github.com/OrzMC/OrzPythonMC/commit/e4c999a2547a05fb64aac0167220682dc4acc010))
+* **infra:** 流式下载中途断连重试并 Range 续传 ([#36](https://github.com/OrzMC/OrzPythonMC/issues/36)) ([50ef96c](https://github.com/OrzMC/OrzPythonMC/commit/50ef96c919b2e0ee54ad474b82fda618ce532e9a))
+* **runner:** 服务端退出码归一（信号 → 128+signal） ([#45](https://github.com/OrzMC/OrzPythonMC/issues/45)) ([dee5be7](https://github.com/OrzMC/OrzPythonMC/commit/dee5be7bfdea483ebdb82d381c80c300f9a4e381))
+
 ## [2.4.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.4.0...v2.4.1) (2026-09-18)
 
 
