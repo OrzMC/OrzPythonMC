@@ -7,6 +7,7 @@ and any external project should only import from here; internals live under
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 
 from orzmc.core.mojang import VersionEntry
@@ -21,6 +22,7 @@ from orzmc.infra.auth_store import AuthStore
 from orzmc.infra.fs import FileStore
 from orzmc.infra.http import HttpClient
 from orzmc.infra.log import NullReporter, Reporter, RichReporter
+from orzmc.infra.process_registry import ProcessRegistry
 from orzmc.infra.progress import NullProgress, ProgressSink, RichProgress
 from orzmc.infra.runner import ProcessRunner
 from orzmc.services.app import AppInstaller, AppStatus
@@ -84,6 +86,7 @@ __all__ = [
     "game_args",
     "install_java",
     "jvm_args",
+    "kill_all_servers",
     # entry points
     "launch_client",
     "list_versions",
@@ -273,6 +276,14 @@ def backup_world(
 ) -> str:
     """Back up ``versions/<version>/server/<game_type>/world`` to ``backup/worlds/``."""
     return Backup(reporter=reporter, root_dir=root_dir).backup_world(version, game_type)
+
+
+def kill_all_servers(root_dir: str | None = None) -> list[int]:
+    """Terminate every server recorded under ``<root>/run`` (``orzmc server --kill-all``).
+
+    Returns the PIDs that were signalled; stale records are cleared silently.
+    """
+    return ProcessRegistry(FileStore(), os.path.join(root_dir or DEFAULT_ROOT, "run")).kill_all()
 
 
 def install_java(

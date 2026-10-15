@@ -34,6 +34,7 @@ from orzmc import (
     backup_world,
     check_self_update,
     deploy_server,
+    kill_all_servers,
     launch_client,
     list_versions,
     remove_version,
@@ -283,11 +284,24 @@ def server(
     ] = False,
     refresh: Refresh = False,
     download_threads: DownloadThreads = DEFAULT_DOWNLOAD_THREADS,
+    kill_all: Annotated[bool, typer.Option("--kill-all", "-k", help="杀掉所有运行中的服务端")] = False,
     root_dir: RootDir = None,
 ) -> None:
     """部署并运行 Minecraft 服务端(缺失文件自动下载即安装)。"""
     _begin("server", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
+    if kill_all:
+        try:
+            killed = kill_all_servers(root_dir=root_dir)
+        except Exception as exc:
+            _fail(str(exc), code="E_RUNTIME")
+        _emit({"mode": "kill-all", "killed": killed})
+        if not _json_mode():
+            if killed:
+                _console.print(f"[success]已终止 {len(killed)} 个服务端进程[/success]")
+            else:
+                _console.print("没有运行中的服务端")
+        return
     game_type_obj = _parse_type(game_type, client=False)
     _check_mem("min", min_mem)
     _check_mem("max", max_mem)

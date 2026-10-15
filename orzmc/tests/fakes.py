@@ -239,8 +239,10 @@ class FakeProcess(ProcessRunner):
         self.detached: list[list[str]] = []
         self.created = created or []
 
-    def run_stream(self, cmd: list[str], on_line=None, cwd: str | None = None) -> int:
+    def run_stream(self, cmd: list[str], on_line=None, cwd: str | None = None, on_start=None) -> int:
         self.calls.append(list(cmd))
+        if on_start is not None:
+            on_start(4242)
         for path in self.created:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:

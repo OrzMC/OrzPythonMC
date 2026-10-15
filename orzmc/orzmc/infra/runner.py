@@ -41,10 +41,13 @@ class ProcessRunner:
         args: list[str],
         on_line: Callable[[str], None] | None = None,
         cwd: str | None = None,
+        on_start: Callable[[int], None] | None = None,
     ) -> int:
         """Run a foreground process, forwarding its stdout lines to ``on_line``.
 
-        Blocks until the process exits and returns its exit code.
+        ``on_start`` receives the child PID right after spawn (used to record
+        running servers for ``--kill-all``). Blocks until exit; returns the
+        normalized exit code.
         """
         self._reporter.debug("$ " + " ".join(args))
         proc = subprocess.Popen(
@@ -61,6 +64,8 @@ class ProcessRunner:
             bufsize=1,
             cwd=cwd,
         )
+        if on_start is not None:
+            on_start(proc.pid)
         if proc.stdout is not None:
             try:
                 for line in proc.stdout:

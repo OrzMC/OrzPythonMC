@@ -570,3 +570,11 @@ def test_client_auth_without_client_id_json(monkeypatch) -> None:
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["ok"] is False
     assert payload["error"]["code"] == "E_AUTH_NOT_CONFIGURED"
+
+
+def test_server_kill_all_json(monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "kill_all_servers", lambda root_dir=None: [111, 222])
+    result = runner.invoke(app, ["--json", "server", "--kill-all"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["data"] == {"mode": "kill-all", "killed": [111, 222]}
