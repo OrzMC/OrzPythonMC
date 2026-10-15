@@ -23,6 +23,9 @@ from orzmc.domain.auth import (
 # ── 端点与常量(规范值,见 docs/spec/auth.md §3)─────────────────────────────
 AUTHORITY = "https://login.microsoftonline.com/consumers/oauth2/v2.0"
 DEFAULT_SCOPE = "XboxLive.signin offline_access"
+# 内置 Azure 公共客户端 client_id(组织目录 + 个人账号,Allow public client flows = Yes)。
+# 空串 = 未内置;可用环境变量 ORZMC_AZURE_CLIENT_ID 覆盖(见 docs/spec/auth.md §10)。
+DEFAULT_CLIENT_ID = ""
 XBL_URL = "https://user.auth.xboxlive.com/user/authenticate"
 XSTS_URL = "https://xsts.auth.xboxlive.com/xsts/authorize"
 MC_LOGIN_URL = "https://api.minecraftservices.com/authentication/login_with_xbox"

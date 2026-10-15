@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 
+from orzmc.core.auth import DEFAULT_CLIENT_ID
 from orzmc.core.mojang import VersionEntry
 from orzmc.domain.auth import AuthSession, DeviceCode
 from orzmc.domain.java import DEFAULT_JAVA_MAJOR, required_java_major
@@ -94,6 +95,7 @@ __all__ = [
     "remote_versions",
     "remove_version",
     "required_java_major",
+    "resolve_client_id",
     "resolve_libraries",
     "uninstall_self",
     "update_self",
@@ -284,6 +286,16 @@ def kill_all_servers(root_dir: str | None = None) -> list[int]:
     Returns the PIDs that were signalled; stale records are cleared silently.
     """
     return ProcessRegistry(FileStore(), os.path.join(root_dir or DEFAULT_ROOT, "run")).kill_all()
+
+
+def resolve_client_id(override: str | None = None) -> str:
+    """Resolve the Azure public-client ``client_id`` for ``--auth``.
+
+    Precedence: explicit ``override`` → env ``ORZMC_AZURE_CLIENT_ID`` → built-in
+    default. Empty string means "not configured" (caller reports
+    ``E_AUTH_NOT_CONFIGURED``).
+    """
+    return (override or os.environ.get("ORZMC_AZURE_CLIENT_ID", "") or DEFAULT_CLIENT_ID).strip()
 
 
 def install_java(
