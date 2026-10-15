@@ -135,6 +135,8 @@ class ServerService:
         if self._options.nogui and "nogui" not in user_args:
             cmd.append("nogui")
         cmd += user_args
+        if self._options.print_jar_help and "--help" not in cmd:
+            cmd.append("--help")
         if self._options.demo and "--demo" not in cmd:
             cmd.append("--demo")
         if self._options.force_upgrade and "--forceUpgrade" not in cmd:

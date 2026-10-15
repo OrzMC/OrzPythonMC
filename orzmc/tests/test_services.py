@@ -403,6 +403,28 @@ class TestServerService:
         content = services.fs.read_text(services.context.paths.server_properties_path())
         assert content.count("online-mode=false") == 1
 
+    def test_write_server_properties_online_mode(self, tmp_path, reporter, sink, http) -> None:
+        services = _services(tmp_path, reporter, sink, http, online_mode=True)
+        ServerService(services)._write_server_properties()
+        content = services.fs.read_text(services.context.paths.server_properties_path())
+        assert "online-mode=true" in content
+
+    def test_build_server_command_demo(self, tmp_path, reporter, sink, http) -> None:
+        services = _services(tmp_path, reporter, sink, http, demo=True)
+        cmd = ServerService(services)._build_server_command("/managed/java")
+        assert cmd.count("--demo") == 1
+        assert cmd[-1] == "--demo"
+
+    def test_build_server_command_demo_not_duplicated(self, tmp_path, reporter, sink, http) -> None:
+        services = _services(tmp_path, reporter, sink, http, demo=True, server_args="--demo")
+        cmd = ServerService(services)._build_server_command("/managed/java")
+        assert cmd.count("--demo") == 1
+
+    def test_build_server_command_print_jar_help(self, tmp_path, reporter, sink, http) -> None:
+        services = _services(tmp_path, reporter, sink, http, print_jar_help=True)
+        cmd = ServerService(services)._build_server_command("/managed/java")
+        assert cmd.count("--help") == 1
+
 
 class TestCoreProvider:
     def test_registry_covers_all_game_types(self) -> None:
