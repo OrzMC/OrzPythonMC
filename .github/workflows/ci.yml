@@ -88,6 +88,21 @@ jobs:
       - name: Build both packages
         run: uv build --all-packages
 
+      # 命令面单一化（规范 docs/spec/cli-surface.md §8.3，路线 A）：用真实
+      # `orzmc --json capabilities` 与父仓库 manifest 对比，未声明漂移即红灯。
+      - name: Checkout parent (CLI surface manifest)
+        uses: actions/checkout@v7
+        with:
+          repository: OrzMC/OrzMC
+          path: parent
+      - name: CLI surface check (strict)
+        run: |
+          uv run --all-packages orzmc --json capabilities > "$RUNNER_TEMP/caps.json"
+          python3 parent/scripts/verify/surface.py \
+            --implementation python \
+            --capabilities "$RUNNER_TEMP/caps.json" \
+            --strict
+
   # Pure-Python tests with fakes, but they exercise OS-sensitive paths
   # (path sep, platform.machine, subprocess creation flags, zip/tar extract)
   # — worth the full 6-platform sweep to catch OS bugs cheaply.
