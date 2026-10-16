@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.9.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.9.0...v2.9.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* orzmc update 别把 CWD 同名文件当目标（裸名 argv[0] 解析） ([#60](https://github.com/OrzMC/OrzPythonMC/issues/60)) ([cec60a8](https://github.com/OrzMC/OrzPythonMC/commit/cec60a8b0f10c8a38b077ca78335579993abbf7c))
+* running_binary 在 Windows 优先用 sys.executable（shutil.which 先搜 CWD） ([#62](https://github.com/OrzMC/OrzPythonMC/issues/62)) ([e2bf959](https://github.com/OrzMC/OrzPythonMC/commit/e2bf959e852150411f01b512494e2249586396e6))
+
 ## [2.9.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.8.0...v2.9.0) (2026-10-15)
 
 
