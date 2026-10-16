@@ -315,6 +315,12 @@ orzmc client -v 26.2
 <span class="cm"># 以 Fabric 启动客户端</span>
 orzmc client -v 26.2 -t fabric -u Steve
 
+<span class="cm"># 以 Forge 启动客户端(自动下载官方安装器并收割 patched client jar)</span>
+orzmc client -v 26.2 -t forge -u Steve
+
+<span class="cm"># 正版登录(Microsoft 设备码;内置 client_id 开箱即用,令牌只存本机)</span>
+orzmc client -v 26.2 --auth -u Steve
+
 <span class="cm"># 部署并启动 Paper 服务端(自动接受 EULA,无窗口模式)</span>
 orzmc server -v 26.2 -t paper --yes --nogui
 
@@ -358,6 +364,11 @@ orzmc update</pre></div>
           <div class="icon">🖥️</div>
           <h3>服务端部署一键化</h3>
           <p>自动接受 EULA、写入配置;支持 vanilla / Paper / Fabric / Forge,<code>--nogui</code> 无窗口启动、<code>stop</code> 或 Ctrl-C 优雅关闭。</p>
+        </div>
+        <div class="feat">
+          <div class="icon">🔐</div>
+          <h3>正版登录</h3>
+          <p><code>orzmc client --auth</code> 走 Microsoft 设备码流程,内置公共 <code>client_id</code> 开箱即用;令牌只存本机状态目录(<code>0600</code>),不经过任何中间服务器。</p>
         </div>
         <div class="feat">
           <div class="icon">🌍</div>
