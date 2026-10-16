@@ -34,6 +34,10 @@ exclude = ["dist", "build"]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
 ignore = ["SIM105"]
 
+[tool.ruff.lint.per-file-ignores]
+# 生成文件：含中文全角标点（RUF001/RUF002 会误报），由 scripts/sync_compliance.py 生成。
+"orzmc/orzmc/_compliance.py" = ["RUF001", "RUF002"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["orzmc", "orzmc_app"]
 

@@ -33,6 +33,7 @@ from orzmc import (
     backup_world,
     check_self_update,
     deploy_server,
+    disclaimer_line,
     kill_all_servers,
     launch_client,
     list_versions,
@@ -165,9 +166,11 @@ def root(
     不带子命令时打印帮助;直接使用子命令(如 ``orzmc client -v 26.2``)。
     """
     if version:
-        _print_json({"tool": APP_VERSION, "library": LIB_VERSION}) if json_output else _console.print(
-            f"orzmc {APP_VERSION} (库 {LIB_VERSION})"
-        )
+        if json_output:
+            _print_json({"tool": APP_VERSION, "library": LIB_VERSION, "disclaimer": disclaimer_line()})
+        else:
+            _console.print(f"orzmc {APP_VERSION} (库 {LIB_VERSION})")
+            _console.print(disclaimer_line())
         raise typer.Exit(0)
     ctx.obj = {"verbose": verbose, "root_dir": root_dir, "json": json_output}
     if ctx.invoked_subcommand is None:
@@ -649,9 +652,10 @@ def app_command(
 def version(ctx: typer.Context) -> None:
     """打印工具版本。"""
     _begin("version", ctx)
-    _emit({"tool": APP_VERSION, "library": LIB_VERSION})
+    _emit({"tool": APP_VERSION, "library": LIB_VERSION, "disclaimer": disclaimer_line()})
     if not _json_mode():
         _console.print(f"orzmc {APP_VERSION} (库 {LIB_VERSION})")
+        _console.print(disclaimer_line())
 
 
 def _prog_name(ctx: typer.Context) -> str:

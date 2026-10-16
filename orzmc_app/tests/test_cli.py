@@ -10,7 +10,7 @@ from typing import Any, cast
 import typer
 from typer.testing import CliRunner
 
-from orzmc import DEFAULT_DOWNLOAD_THREADS, MAX_DOWNLOAD_THREADS, FileStore, UpdateCheck
+from orzmc import DEFAULT_DOWNLOAD_THREADS, MAX_DOWNLOAD_THREADS, FileStore, UpdateCheck, disclaimer_line
 from orzmc import __version__ as lib_version
 from orzmc_app import __version__
 from orzmc_app.cli import app
@@ -78,7 +78,7 @@ def test_json_version_envelope() -> None:
     assert json.loads(result.stdout) == {
         "ok": True,
         "command": "version",
-        "data": {"tool": __version__, "library": lib_version},
+        "data": {"tool": __version__, "library": lib_version, "disclaimer": disclaimer_line()},
         "error": None,
     }
 
