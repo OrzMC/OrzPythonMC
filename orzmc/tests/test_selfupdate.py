@@ -358,6 +358,26 @@ class TestUpdateFromLocalFile:
         assert result is not None and result.applied is True
         assert any("未找到安装记录" in text for text in reporter.texts)
 
+    def test_upgrading_a_copy_leaves_the_install_record_alone(self, tmp_path) -> None:
+        """A copy (e.g. ``~/Downloads/orzmc``) must not rewrite the global record.
+
+        Regression: ``_record`` trusted the state-dir manifest even when the
+        replaced binary was a *different* file, so the record claimed the
+        installed binary was the new version while it was still old.
+        """
+        fs, installed = _install(tmp_path, version="v1.0.0")
+        copy = str(tmp_path / "downloads" / "orzmc")
+        FileStore().write_text(copy, "copy-binary")
+        process = FakeProcess()
+        result = update_self(copy, file=_new_binary(tmp_path), version="v2.0.0", yes=True, process=process)
+        assert result is not None and result.applied is True
+        _run_applier(process, copy)
+        # the copy was replaced …
+        assert FileStore().read_text(copy) == _payload().decode("latin-1")
+        # … but the install record still describes the real install
+        found = InstallManifest.find(fs, binary=installed)
+        assert found is not None and found[1].version == "v1.0.0"
+
     def test_helper_launch_failure_keeps_the_old_binary(self, tmp_path) -> None:
         fs, binary = _install(tmp_path)
 

@@ -12,6 +12,7 @@ has the same notion of *what* was installed and *where*.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -56,6 +57,36 @@ def is_pip_managed(binary: str) -> bool:
     except OSError:
         return False
     return any(name.endswith(".dist-info") or name.endswith(".egg-info") for name in entries)
+
+
+def running_binary(
+    argv0: str | None = None,
+    *,
+    executable: str | None = None,
+    which: Callable[[str], str | None] | None = None,
+) -> str:
+    """Absolute path of the running ``orzmc`` executable.
+
+    ``sys.argv[0]`` is the *word the user typed*, not a path: invoked as a bare
+    ``orzmc`` (the normal case, through ``PATH``) it is literally ``"orzmc"``,
+    and ``Path("orzmc").resolve()`` resolves against the **current working
+    directory**. Self-update then created/overwrote ``./orzmc`` and left the
+    installed binary untouched — while still rewriting the global install
+    record, so the next run believed it was already current.
+
+    Resolution: an explicit path (contains a separator) wins; otherwise look the
+    bare name up on ``PATH``; fall back to the interpreter / frozen executable.
+    """
+    raw = sys.argv[0] if argv0 is None else argv0
+    if raw and (os.sep in raw or (os.altsep is not None and os.altsep in raw)):
+        return os.path.realpath(os.path.expanduser(raw))
+    resolver = which or shutil.which
+    if raw:
+        found = resolver(raw)
+        if found:
+            return os.path.realpath(os.path.expanduser(found))
+    fallback = sys.executable if executable is None else executable
+    return os.path.realpath(os.path.expanduser(fallback))
 
 
 def schedule_delete_on_reboot(path: str) -> bool:

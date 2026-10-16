@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import re
 import sys
-from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
 import typer
@@ -39,6 +38,7 @@ from orzmc import (
     list_versions,
     remove_version,
     resolve_client_id,
+    running_binary,
     uninstall_self,
     update_self,
 )
@@ -400,7 +400,7 @@ def self_uninstall(
     与 ``remove``(移除 Minecraft 版本)不同,``self-uninstall`` 删除的是
     ``orzmc`` 自身。游戏数据默认保留;``--remove-root`` 连 ``~/minecraft`` 一起删。
     """
-    binary = str(Path(sys.argv[0]).resolve())
+    binary = running_binary()
     _begin("self-uninstall", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
     try:
@@ -439,7 +439,7 @@ def update(
     (也是 GitHub API 限流时的回退),``--check`` 只检查,``--file`` 用本地文件。
     卸载请用 ``self-uninstall``,Minecraft 版本管理请用 ``list`` / ``remove``。
     """
-    binary = str(Path(sys.argv[0]).resolve())
+    binary = running_binary()
     if channel not in ("release", "beta"):
         _fail(f"未知更新渠道: {channel}(可选 release、beta)")
     _begin("update", ctx)

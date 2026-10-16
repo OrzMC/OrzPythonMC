@@ -448,6 +448,11 @@ class SelfUpdater:
             self._reporter.warn("未找到安装记录,已替换二进制;建议重跑一键安装器补登记")
             return
         path, manifest = found
+        if manifest.binary and os.path.realpath(manifest.binary) != os.path.realpath(self._binary):
+            # 升级的是另一份拷贝(不是安装记录指向的二进制):不动全局安装记录。
+            # 否则记录会被改成新版本,而真正安装的二进制仍是旧版(实测过的坑)。
+            self._reporter.debug("升级的不是安装记录中的二进制,跳过安装记录更新")
+            return
         replace(
             manifest,
             version=check.latest,

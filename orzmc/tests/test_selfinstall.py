@@ -15,7 +15,7 @@ from fakes import FakeReporter
 from orzmc import InstallManifest as PublicInstallManifest
 from orzmc import uninstall_self
 from orzmc.infra.fs import FileStore
-from orzmc.services.selfinstall import InstallManifest, SelfUninstaller, default_state_dir
+from orzmc.services.selfinstall import InstallManifest, SelfUninstaller, default_state_dir, running_binary
 
 skip_windows = pytest.mark.skipif(os.name == "nt", reason="Unix-only behavior")
 skip_unix = pytest.mark.skipif(os.name != "nt", reason="Windows-only behavior")
@@ -441,3 +441,47 @@ class TestWindowsPathRestore:
         assert "alias foo=bar" in rc_text
         assert fake.opened == []  # 注册表从未被打开
         assert fake.path == "C:\\Users\\u\\bin"
+
+
+class TestRunningBinary:
+    """``running_binary`` resolves the *installed* binary, never a CWD decoy.
+
+    Regression: ``orzmc update``/``self-uninstall`` used
+    ``Path(sys.argv[0]).resolve()``. A bare ``orzmc`` (invoked through ``PATH``)
+    is just the word ``orzmc``, so it resolved against the CWD — updating or
+    creating ``./orzmc`` and leaving the installed binary (and the user) on the
+    old version.
+    """
+
+    def test_bare_name_resolves_via_path_not_cwd(self, tmp_path, monkeypatch) -> None:
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        (cwd / "orzmc").write_text("decoy")
+        monkeypatch.chdir(cwd)
+        installed = tmp_path / "bin" / "orzmc"
+        installed.parent.mkdir()
+        installed.write_text("real")
+        resolved = running_binary("orzmc", which=lambda _name: str(installed))
+        assert resolved == os.path.realpath(str(installed))
+        assert resolved != os.path.realpath(str(cwd / "orzmc"))
+
+    def test_explicit_path_ignores_path_lookup(self, tmp_path) -> None:
+        explicit = tmp_path / "somewhere" / "orzmc"
+        explicit.parent.mkdir()
+        explicit.write_text("x")
+        assert running_binary(str(explicit), which=lambda _name: "/decoy/orzmc") == os.path.realpath(str(explicit))
+
+    def test_falls_back_to_executable_when_absent_from_path(self, tmp_path) -> None:
+        fallback = tmp_path / "python3"
+        fallback.write_text("x")
+        resolved = running_binary("orzmc", which=lambda _name: None, executable=str(fallback))
+        assert resolved == os.path.realpath(str(fallback))
+
+    def test_reads_real_argv0_and_path_by_default(self, tmp_path, monkeypatch) -> None:
+        installed = tmp_path / "bin" / "orzmc"
+        installed.parent.mkdir()
+        installed.write_text("x")
+        installed.chmod(0o755)  # shutil.which requires an executable bit
+        monkeypatch.setattr(sys, "argv", ["orzmc", "update"])
+        monkeypatch.setenv("PATH", str(installed.parent))
+        assert running_binary() == os.path.realpath(str(installed))

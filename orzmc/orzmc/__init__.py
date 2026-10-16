@@ -33,7 +33,7 @@ from orzmc.services.backup import Backup
 from orzmc.services.client import ClientService
 from orzmc.services.context import AppContext, Services
 from orzmc.services.plugins import DEFAULT_PLUGINS, PluginService
-from orzmc.services.selfinstall import InstallManifest, SelfUninstaller
+from orzmc.services.selfinstall import InstallManifest, SelfUninstaller, running_binary
 from orzmc.services.selfupdate import SelfUpdater, UpdateCheck
 from orzmc.services.server import ServerService
 from orzmc.services.versions import InstalledVersion, VersionManager
@@ -99,6 +99,7 @@ __all__ = [
     "required_java_major",
     "resolve_client_id",
     "resolve_libraries",
+    "running_binary",
     "uninstall_self",
     "update_self",
 ]
