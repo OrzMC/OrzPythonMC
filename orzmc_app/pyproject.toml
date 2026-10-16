@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "orzmc>=2.0.0",
-    "typer>=0.27.2",
+    "typer>=0.27.3",
     "prompt_toolkit>=3.0",
 ]
 
