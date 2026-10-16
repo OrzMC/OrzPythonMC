@@ -478,10 +478,12 @@ class TestRunningBinary:
         assert resolved == os.path.realpath(str(fallback))
 
     def test_reads_real_argv0_and_path_by_default(self, tmp_path, monkeypatch) -> None:
-        installed = tmp_path / "bin" / "orzmc"
+        # On Windows `shutil.which` only matches PATHEXT names, so the fixture is `orzmc.exe`.
+        exe = "orzmc.exe" if os.name == "nt" else "orzmc"
+        installed = tmp_path / "bin" / exe
         installed.parent.mkdir()
         installed.write_text("x")
-        installed.chmod(0o755)  # shutil.which requires an executable bit
-        monkeypatch.setattr(sys, "argv", ["orzmc", "update"])
+        installed.chmod(0o755)  # shutil.which requires an executable bit (POSIX)
+        monkeypatch.setattr(sys, "argv", [exe, "update"])
         monkeypatch.setenv("PATH", str(installed.parent))
         assert running_binary() == os.path.realpath(str(installed))
