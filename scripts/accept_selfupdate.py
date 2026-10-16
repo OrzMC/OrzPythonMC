@@ -127,15 +127,26 @@ def helper_log(install_dir: Path) -> str:
         return "(助手日志缺失)"
 
 
-def run(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    """Run a command in the repo root; always captures output (no TTY prompts)."""
+def run(
+    args: list[str],
+    env: dict[str, str] | None = None,
+    cwd: str | Path | None = None,
+    executable: str | Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command (default cwd: repo root); always captures output (no TTY prompts).
+
+    ``executable`` runs that file while keeping ``args[0]`` as ``argv[0]`` — how
+    a shell invokes a bare PATH command, which is exactly the shape that broke
+    self-update (see :func:`step_bare_name`).
+    """
     if _verbose:
         say(f"$ {' '.join(args)}")
     merged = {**os.environ, **(env or {})}
     return subprocess.run(
         args,
-        cwd=str(ROOT),
+        cwd=str(cwd or ROOT),
         env=merged,
+        executable=str(executable) if executable is not None else None,
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -435,6 +446,39 @@ def step_swap_from_file(sandbox: Sandbox) -> None:
     check("安装记录版本已改写", "version=v9.9.9" in record)
 
 
+def step_bare_name(sandbox: Sandbox, powershell: str) -> None:
+    """A bare ``orzmc`` (PATH-style invocation) must upgrade the install, not a CWD namesake.
+
+    Regression: the CLI resolved ``Path(sys.argv[0]).resolve()``. Invoked as
+    ``orzmc`` (the normal case, via ``PATH``) that word is not a path, so it
+    resolved against the **current directory**: an ``orzmc`` file in the CWD was
+    overwritten while the installed binary stayed old — and the install record
+    was rewritten anyway, so the next run reported the new version while still
+    running the old binary. ``executable=`` mimics the server/exec rerun by
+    running the real binary with a bare ``argv[0]``.
+    """
+    say("== 5b) 裸名调用(经 PATH):升级目标必须是安装的二进制,而非 CWD 同名文件 ==")
+    sandbox.install_local(powershell)
+    decoy_dir = sandbox.root / "decoy"
+    decoy_dir.mkdir(parents=True, exist_ok=True)
+    decoy = decoy_dir / BINARY_NAME
+    decoy.write_text("decoy-not-a-binary\n", encoding="utf-8")
+    payload = payload_path()
+    env = {**sandbox.env(), "PATH": f"{sandbox.install_dir}{os.pathsep}{os.environ.get('PATH', '')}"}
+    result = run(
+        [BINARY_NAME, "update", "--file", str(payload), "-v", "v9.9.9", "--yes"],
+        env=env,
+        cwd=decoy_dir,
+        executable=sandbox.binary,
+    )
+    say(f"  {' '.join(plain(result.stdout + result.stderr).split())}")
+    check("裸名升级命令成功", result.returncode == 0, output_of(result) if result.returncode else "exit=0")
+    log = wait_for_helper(sandbox.install_dir)
+    swapped = sandbox.binary.is_file() and sha256(sandbox.binary) == sha256(payload)
+    check("安装的二进制被换成新二进制", swapped, f"助手日志: {log}")
+    check("CWD 的同名文件未被触碰", decoy.read_text(encoding="utf-8") == "decoy-not-a-binary\n")
+
+
 def step_download(sandbox: Sandbox, latest: str, skip: bool, powershell: str) -> None:
     say("== 6) update -v <最新 tag>(真实下载 release 资产) ==")
     if skip or not latest:
@@ -649,6 +693,7 @@ def main(argv: list[str] | None = None) -> int:
         step_install(sandbox, shell)
         latest = step_check(sandbox, tag)
         step_swap_from_file(sandbox)
+        step_bare_name(sandbox, shell)
         step_download(sandbox, latest, args.skip_download, shell)
         step_bad_version(sandbox, shell)
         step_dev_guard(sandbox)
