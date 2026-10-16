@@ -206,3 +206,10 @@ uv run --package orzmc-app python scripts/acceptance.py \
 - 旧 `-E "a:..."` 改为 `--jvm-opts "..."` 与 `--server-args "..."`。
 - 目录结构改为统一布局;`orzmc list` 可查看已装版本与类型,便于迁移。
 - 移除 nginx / rsync / daemon 等系统级能力;直连官方源。
+
+---
+
+> **NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.**
+>
+> OrzMC 是独立的社区开源项目，与 Mojang / Microsoft 无隶属、赞助或背书关系，对本项目负责。
+> 联系：824219521@qq.com ｜ “Minecraft”名称、品牌与素材的一切权利归 Mojang / Microsoft 所有。
