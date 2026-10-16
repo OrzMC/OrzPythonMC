@@ -123,24 +123,28 @@ orzmc update
 每个子命令都可加 `--help` 查看完整参数(如 `orzmc client --help`)。
 
 ```
-orzmc [--verbose]                 # 无子命令 → 打印帮助
+orzmc [--verbose] [--json] [--root-dir DIR]   # 无子命令 → 打印帮助
 orzmc client   [-v VER] [--username|-u USER] [-t vanilla|fabric|forge] [-m MIN] [-x MAX]
-               [--extract-music] [--jvm-opts ...] [--refresh] [-j THREADS]
+               [--auth] [--extract-music] [--jvm-opts ...] [--refresh] [-j THREADS] [--root-dir DIR]
 orzmc server   [-v VER] [-t vanilla|paper|fabric|forge] [-m MIN] [-x MAX]
                [--force-upgrade] [--symlink] [--force-download] [--yes]
-               [--jvm-opts ...] [--server-args ...] [--nogui] [--refresh] [-j THREADS]
+               [--jvm-opts ...] [--server-args ...] [--nogui] [--demo] [--print-jar-help]
+               [--online-mode] [--kill-all] [--refresh] [-j THREADS] [--root-dir DIR]
 orzmc remove   -v VER [--server -t TYPE] [--yes]
-orzmc update   [-v VER] [--check] [--file PATH] [--yes] [--force]
+orzmc update   [-v VER] [--check] [--channel release|beta] [--file PATH] [--yes] [--force]
 orzmc self-uninstall [--yes] [--remove-root] [--force]
 orzmc list
 orzmc backup   [-v VER] [-t TYPE]
-orzmc version
+orzmc plugin   [-s 关键词] [-l] [-o 目录] [-v 游戏版本] [-c 数量]   # Hangar 搜索 / 下载服务端插件
+orzmc app      install|open|uninstall|status                # macOS 应用
+orzmc version | capabilities | completion [bash|zsh|fish|powershell|install] | mcp
 ```
 
 要点:
 
 - **版本缺省**:有 TTY 时弹出键盘导航选择器(`↑↓` 选择、`←→` / PgUp / PgDn 翻页、输入即过滤、`t` 切正式 / 测试版、`x` 清空、Enter 选中、Esc 用最新);脚本 / 管道等非 TTY 场景自动用最新 release 与默认值,不阻塞。
 - **玩家名**:`client` 默认 `guest`;TTY 下未指定 `-u/--username` 会交互询问(回车用默认);脚本 / 管道等非 TTY 场景静默用默认。
+- **正版登录**:`client --auth` 走 **Microsoft 设备码**流程,令牌存本机状态目录 `auth.json`(权限 `0600`),只用于本机启动。已内置公共 `client_id`,**开箱即用**;需要时可用环境变量 `ORZMC_AZURE_CLIENT_ID` 覆盖(详见父仓库 `docs/spec/auth.md`)。
 - **运行即安装**:`client` / `server` 检测到文件缺失会自动下载补齐;下载进度显示**大小 / 速度 / 剩余时间**(如 `35.6/39.2 MB 6.4 MB/s 0:00:01`),批量资源阶段显示文件计数与百分比,元数据请求也有不定长进度条 —— 慢网不会静默等待。
 - **下载并发**:`-j/--download-threads`(1-64,默认 16)。资源阶段是几千个几十 KB 的小文件,耗时几乎完全由**每请求延迟 乘 并发数**决定而不是带宽:在延迟高 / 走代理的链路上把它调大(如 `-j 32`)能成倍提速(实测 8→32 线程约 2.2 倍);连接池会跟着并发自动放大,不会因池太小而反复重建 TLS;`-j 1` 表示完全单流。
 - **大文件分块**:客户端 jar / 服务端 jar / JRE(≥8MB)自动分 4 路 `Range` 并行下载再拼接(实测 39MB 客户端 jar 单流 2.5 MB/s → 4 路 4.0 MB/s),服务器忽略 `Range`(部分代理/镜像)时自动回退单流,拼接后仍按 SHA-1 校验。
