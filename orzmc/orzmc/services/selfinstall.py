@@ -64,6 +64,7 @@ def running_binary(
     *,
     executable: str | None = None,
     which: Callable[[str], str | None] | None = None,
+    frozen: bool | None = None,
 ) -> str:
     """Absolute path of the running ``orzmc`` executable.
 
@@ -74,19 +75,30 @@ def running_binary(
     installed binary untouched — while still rewriting the global install
     record, so the next run believed it was already current.
 
-    Resolution: an explicit path (contains a separator) wins; otherwise look the
-    bare name up on ``PATH``; fall back to the interpreter / frozen executable.
+    Resolution: an explicit path (contains a separator) wins. For a bare name,
+    the frozen build's ``sys.executable`` is the installed binary — and it also
+    dodges ``shutil.which`` searching the **current directory first** on
+    Windows, where a same-named file would otherwise win over the install. Only
+    a non-frozen (dev) run looks the name up on ``PATH`` (still refusing a CWD
+    hit), falling back to the interpreter.
     """
     raw = sys.argv[0] if argv0 is None else argv0
     if raw and (os.sep in raw or (os.altsep is not None and os.altsep in raw)):
         return os.path.realpath(os.path.expanduser(raw))
+    fallback = os.path.realpath(os.path.expanduser(sys.executable if executable is None else executable))
+    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    if is_frozen and raw:
+        # PyInstaller sets sys.executable to the frozen binary itself.
+        return fallback
     resolver = which or shutil.which
     if raw:
         found = resolver(raw)
         if found:
-            return os.path.realpath(os.path.expanduser(found))
-    fallback = sys.executable if executable is None else executable
-    return os.path.realpath(os.path.expanduser(fallback))
+            candidate = os.path.realpath(os.path.expanduser(found))
+            # Windows searches the CWD first; never let a namesake there win.
+            if os.path.dirname(candidate) != os.path.realpath(os.curdir):
+                return candidate
+    return fallback
 
 
 def schedule_delete_on_reboot(path: str) -> bool:

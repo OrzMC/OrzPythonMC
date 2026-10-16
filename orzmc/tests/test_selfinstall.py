@@ -487,3 +487,28 @@ class TestRunningBinary:
         monkeypatch.setattr(sys, "argv", [exe, "update"])
         monkeypatch.setenv("PATH", str(installed.parent))
         assert running_binary() == os.path.realpath(str(installed))
+
+    def test_frozen_build_uses_its_own_executable(self, tmp_path, monkeypatch) -> None:
+        # PyInstaller's sys.executable is the installed binary; a CWD namesake
+        # (which `shutil.which` would return on Windows) must not win.
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        decoy = cwd / "orzmc"
+        decoy.write_text("decoy")
+        monkeypatch.chdir(cwd)
+        real = tmp_path / "bin" / "orzmc"
+        real.parent.mkdir()
+        real.write_text("real")
+        resolved = running_binary("orzmc", executable=str(real), frozen=True, which=lambda _n: str(decoy))
+        assert resolved == os.path.realpath(str(real))
+
+    def test_cwd_lookup_is_discarded_when_not_frozen(self, tmp_path, monkeypatch) -> None:
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        decoy = cwd / "orzmc"
+        decoy.write_text("decoy")
+        monkeypatch.chdir(cwd)
+        real = tmp_path / "python3"
+        real.write_text("x")
+        resolved = running_binary("orzmc", executable=str(real), frozen=False, which=lambda _n: str(decoy))
+        assert resolved == os.path.realpath(str(real))
