@@ -36,7 +36,12 @@ def main() -> int:
     try:
         app()
         return 0
-    except typer.Exit as exc:
+    except SystemExit as exc:
+        # click 在 standalone 模式下用 ``sys.exit`` 收尾:``--help`` 是 0,用法错误是
+        # **2**。规范 §6 的退出码只有 0 / 1 / 130,故把非 0 的收敛成 1(130 = 取消)。
+        code = exc.code if isinstance(exc.code, int) else 0
+        return 0 if code == 0 else (130 if code == 130 else 1)
+    except typer.Exit as exc:  # pragma: no cover - click 已把它转成 SystemExit
         return exc.exit_code or 0
     except KeyboardInterrupt:
         print("已取消", file=sys.stderr)

@@ -74,6 +74,15 @@ def main() -> int:
         str(build_dir),
         "--clean",
         "--noconfirm",
+        # shellingham 用 ``importlib.import_module(f".{os.name}")`` **动态**导入平台
+        # 实现,PyInstaller 静态分析看不到,也没有对应 hook → 冻结后的二进制里缺
+        # ``shellingham.posix`` / ``shellingham.nt``,任何 shell 探测都直接
+        # ``RuntimeError: Shell detection not implemented for 'posix'``
+        # (2.11.0 及更早的发布版真踩过:``--show-completion`` / ``completion install``)。
+        # 现在 CLI 自己不再依赖探测,但 typer 的内部补全路径仍可能在引用它 ——
+        # 显式收集比“祈祷用不到”可靠,也避免下一个调用点重踩。
+        "--collect-submodules",
+        "shellingham",
         str(entry),
     ]
     result = subprocess.run(cmd, cwd=str(ROOT))

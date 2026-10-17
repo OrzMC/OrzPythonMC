@@ -17,6 +17,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv run --all-packages pytest
+uv run python scripts/accept_cli.py          # CLI 行为验收(真实进程:帮助/信封/退出码/取消/补全/MCP)
 uv build --all-packages
 ```
 
@@ -26,6 +27,17 @@ uv build --all-packages
 uv run python scripts/accept_selfupdate.py                # 构建 + 安装 + 更新 + 卸载全流程
 uv run python scripts/accept_selfupdate.py --skip-build   # 复用已有二进制,快
 ```
+
+改动涉及 CLI 命令面 / 补全 / 打包时,再拿**冻结二进制**跑同一套 CLI 验收(和 CI 的 `binary` job 一样):
+
+```bash
+uv run --package orzmc-app python scripts/build.py
+uv run python scripts/accept_cli.py --cli dist/orzmc
+uv run python scripts/accept_cli.py --list-cases              # 看全部用例
+uv run python scripts/accept_cli.py --only completion,frozen   # 只跑相关分组
+```
+
+`scripts/accept_cli.py` 按 `docs/spec/*.md` 断言(不是按当前实现),所以**规范没改就别改断言**。
 
 ## PR 上的 CI 与「合前重验收」
 

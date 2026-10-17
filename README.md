@@ -81,7 +81,8 @@ orzmc uninstall [--yes] [--remove-root] [--force]
 ```
 
 - 删除 orzmc 二进制、还原安装器登记的 PATH 修改、清理空目录。
-- 游戏数据(默认 `~/minecraft`)默认保留;`--remove-root` 连游戏数据一起删;`--yes` 免确认(脚本化调用)。
+- 游戏数据(默认 `~/minecraft`)默认保留;`--remove-root` 连游戏数据一起删。
+- `--yes` 免确认;**非交互(脚本 / CI)调用必须带 `--yes`**,否则按规范返回取消并退出 130。
 - 与 `orzmc remove`(移除某个 **Minecraft 版本**)不同,`uninstall` 卸载的是**工具本身**。
 
 **按安装方式手动卸载(备用)**
@@ -132,12 +133,14 @@ orzmc server   [-v VER] [-t vanilla|paper|fabric|forge] [-m MIN] [-x MAX]
                [--online-mode] [--kill-all] [--refresh] [-j THREADS] [--root-dir DIR]
 orzmc remove   -v VER [--server -t TYPE] [--yes]
 orzmc update   [-v VER] [--check] [--channel release|beta] [--file PATH] [--yes] [--force]
-orzmc uninstall [--yes] [--remove-root] [--force]
+orzmc uninstall [--yes] [--remove-root] [--force]          # 非交互需 --yes
 orzmc list
 orzmc backup   [-v VER] [-t TYPE]
 orzmc plugin   [-s 关键词] [-l] [-o 目录] [-v 游戏版本] [-c 数量]   # Hangar 搜索 / 下载服务端插件
 orzmc app      install|open|uninstall|status                # macOS 应用
-orzmc version | capabilities | completion [bash|zsh|fish|powershell|install] | mcp
+orzmc version | capabilities | mcp
+orzmc completion bash|zsh|fish|powershell|pwsh      # 打印补全脚本到 stdout
+orzmc completion install                          # 按 $SHELL 装到标准补全目录(幂等;不改执行策略)
 ```
 
 要点:

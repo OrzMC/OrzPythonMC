@@ -62,10 +62,20 @@ class NullReporter(Reporter):
 
 
 class RichReporter(Reporter):
-    """Renders to a rich Console. ``debug`` lines only show when ``verbose``."""
+    """Renders to a rich Console. ``debug`` lines only show when ``verbose``.
+
+    An injected ``console`` (the CLI passes ``Console(stderr=True)`` for
+    ``--json``) may not carry :data:`ORZMC_THEME`, and ``print(..., style="info")``
+    then raises ``MissingStyle`` on the very first log line. Push the theme onto
+    it so injected consoles behave like the default one.
+    """
 
     def __init__(self, console: Console | None = None, verbose: bool = False) -> None:
-        self._console = console or Console(theme=ORZMC_THEME)
+        if console is None:
+            self._console = Console(theme=ORZMC_THEME)
+        else:
+            self._console = console
+            self._console.push_theme(ORZMC_THEME)
         self.verbose = verbose
 
     def _print(self, text: str, style: str) -> None:

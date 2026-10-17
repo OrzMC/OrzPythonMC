@@ -17,7 +17,6 @@ from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
 from typer.completion import get_completion_script
-from typer.completion import install as install_completion
 
 from orzmc import (
     DEFAULT_DOWNLOAD_THREADS,
@@ -48,6 +47,9 @@ from orzmc import (
 from orzmc.infra.log import RichReporter
 from orzmc.infra.progress import RichProgress
 from orzmc_app import __version__ as APP_VERSION
+from orzmc_app.cli.completions import SHELLS as INSTALLABLE_SHELLS
+from orzmc_app.cli.completions import install as install_completion
+from orzmc_app.cli.completions import resolve_shell
 from orzmc_app.cli.introspect import command_specs
 from orzmc_app.cli.options import (
     DownloadThreads,
@@ -64,12 +66,33 @@ from orzmc_app.cli.options import (
 from orzmc_app.cli.prompts import confirm_eula, confirm_java, is_interactive, resolve_username, resolve_version
 
 _console = Console(highlight=False)
-app = typer.Typer(add_completion=True, no_args_is_help=False, invoke_without_command=True)
+# 规范 §6:错误信息写 **stderr**(人类可读结果才进 stdout)。
+_console_err = Console(stderr=True, highlight=False)
+
+# ``-h`` 是规范 §3 / ``cli-surface.json`` 的 ``globalOptions`` 要求(两套实现都要有);
+# click 的 ``help_option_names`` 会被子 context 继承,故根上写一次即可。
+app = typer.Typer(
+    add_completion=True,
+    no_args_is_help=False,
+    invoke_without_command=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+
+# typer 的 ``add_completion=True`` 干了两件事:(1) 注册补全类 —— click 处理
+# ``_ORZMC_COMPLETE`` 环境变量(= ``orzmc completion <shell>`` 生成的脚本所依赖的
+# 动态补全)必须有它;(2) 往根命令塞 ``--install-completion`` / ``--show-completion``
+# —— 这两个与我们按规范 §9 实现的 ``completion`` 子命令重复、英文文案、且**只能靠
+# shellingham 探测 shell**(冻结二进制里直接 RuntimeError)。
+# 所以:先触发一次注册,再关掉 typer 私有开关把这两个选项摘掉。
+# ``test_typer_completion_options_are_not_exposed`` 守着这个不变式,typer 升级把它
+# 改坏时会在单测里红,而不是等发布后由用户踩。
+typer.main.get_install_completion_arguments()
+app._add_completion = False
 
 _MEM_RE = re.compile(r"^\d+[kKmMgGtT]$")
 
-# 规范 §9 支持的补全 shell。
-_COMPLETION_SHELLS = frozenset({"bash", "zsh", "fish", "powershell", "pwsh"})
+# 规范 §9 支持的补全 shell(与 capabilities 上报的 completion.target 枚举同源)。
+_COMPLETION_SHELLS = frozenset(INSTALLABLE_SHELLS)
 
 # 当前命令名 + 是否 `--json`(单一进程内单次调用;每次命令开头用 `_begin` 重设)。
 _STATE: dict[str, object] = {"json": False, "command": "_root"}
@@ -101,7 +124,7 @@ def _fail(message: str, *, code: str = "E_USAGE") -> NoReturn:
             }
         )
     else:
-        _console.print(f"[error]错误:[/error] {message}")
+        _console_err.print(f"[error]错误:[/error] {message}")
     raise typer.Exit(130 if code == "E_CANCELLED" else 1)
 
 
@@ -141,7 +164,7 @@ def _parse_type(value: str, *, client: bool) -> GameType:
         _fail(f"未知类型: {value}")
     ok = game_type.is_client_capable if client else game_type.is_server_capable
     if not ok:
-        _fail(f"类型 {value} 不能用于{'客户端' if client else '服务端'}", code="E_UNSUPPORTED")
+        _fail(f"类型 {value} 不能用于{'客户端' if client else '服务端'}", code="E_UNSUPPORTED_TYPE")
     return game_type
 
 
@@ -193,7 +216,11 @@ def client(
     download_threads: DownloadThreads = DEFAULT_DOWNLOAD_THREADS,
     root_dir: RootDir = None,
     auth: Annotated[
-        bool, typer.Option("--auth", help="正版授权(Microsoft 设备码流程;需 ORZMC_AZURE_CLIENT_ID)")
+        bool,
+        typer.Option(
+            "--auth",
+            help="正版授权(Microsoft 设备码流程;client_id 内置,可用 ORZMC_AZURE_CLIENT_ID 覆盖)",
+        ),
     ] = False,
 ) -> None:
     """运行 Minecraft 客户端(缺失文件自动下载即安装)。"""
@@ -378,12 +405,14 @@ def remove(
         )
     except Exception as exc:
         _fail(str(exc), code="E_RUNTIME")
+    if not removed:
+        # 规范 §8.2:需要确认的命令在缺 ``--yes`` 时返回取消(退出 130)。
+        # 之前这里打一行「已取消移除」并以 0 退出,``--json`` 还会报 ``ok: true``
+        # —— AI / 脚本会当成「已删除」。
+        _fail("已取消移除", code="E_CANCELLED")
     _emit({"version": version, "removed": removed})
     if not _json_mode():
-        if removed:
-            _console.print(f"[success]已移除 {version}[/success]")
-        else:
-            _console.print("[yellow]已取消移除[/yellow]")
+        _console.print(f"[success]已移除 {version}[/success]")
 
 
 @app.command("uninstall")
@@ -401,9 +430,13 @@ def uninstall(
     与 ``remove``(移除 Minecraft 版本)不同,``uninstall`` 删除的是
     ``orzmc`` 自身。游戏数据默认保留;``--remove-root`` 连 ``~/minecraft`` 一起删。
     """
-    binary = running_binary()
     _begin("uninstall", ctx)
+    binary = running_binary()
     root_dir = root_dir or ctx.obj.get("root_dir")
+    # 规范 ``frontends.md`` F2:卸载必须保留二次确认。非交互环境没有「二次确认」
+    # 可言,故要求显式 ``--yes``(与 ``remove`` 同一策略);否则返回 130 而不是静默删掉。
+    if not yes and not is_interactive():
+        _fail("非交互环境卸载需显式 --yes(游戏数据默认保留)", code="E_CANCELLED")
     try:
         uninstalled = uninstall_self(
             binary,
@@ -411,7 +444,9 @@ def uninstall(
             remove_root=remove_root,
             yes=yes,
             force=force,
-            reporter=RichReporter(verbose=bool(ctx.obj.get("verbose"))),
+            # 必须用 ``_reporter``:``--json`` 时它把日志切到 stderr,否则库里的
+            # 「已卸载 orzmc」等行会写进 stdout,破坏「stdout 恰好一个 JSON 对象」。
+            reporter=_reporter(ctx),
             # 非交互时无法确认,交给库默认保留游戏数据;交互时弹 rich 确认。
             confirm=(
                 (lambda desc: bool(Confirm.ask(f"{desc}\n确定删除吗?", default=False))) if is_interactive() else None
@@ -440,10 +475,10 @@ def update(
     (也是 GitHub API 限流时的回退),``--check`` 只检查,``--file`` 用本地文件。
     卸载请用 ``uninstall``,Minecraft 版本管理请用 ``list`` / ``remove``。
     """
+    _begin("update", ctx)
     binary = running_binary()
     if channel not in ("release", "beta"):
         _fail(f"未知更新渠道: {channel}(可选 release、beta)")
-    _begin("update", ctx)
     reporter = _reporter(ctx)
     if check:
         try:
@@ -721,10 +756,28 @@ def completion(
     """生成 / 安装 Shell 补全(规范 §9)。"""
     _begin("completion", ctx)
     if target == "install":
-        shell, path = install_completion(prog_name=_prog_name(ctx))
-        _emit({"mode": "install", "shell": shell, "path": str(path)})
+        # shell 由 ``$SHELL`` 决定,不做进程探测(见 ``completions`` 模块说明)。
+        shell = resolve_shell()
+        if shell is None:
+            _fail(
+                "无法判断当前 shell($SHELL 未设置);请用 `orzmc completion <shell>` 生成脚本并按提示安装",
+                code="E_USAGE",
+            )
+        script = get_completion_script(prog_name=_prog_name(ctx), complete_var=_complete_var(ctx), shell=shell)
+        result = install_completion(shell, script)
+        _emit(
+            {
+                "mode": "install",
+                "shell": result.shell,
+                "path": str(result.path) if result.path is not None else None,
+                "hint": result.hint or None,
+            }
+        )
         if not _json_mode():
-            _console.print(f"[success]已安装 {shell} 补全:[/success] {path}")
+            where = str(result.path) if result.path is not None else "(该 shell 不落盘)"
+            _console.print(f"[success]已安装 {shell} 补全:[/success] {where}")
+            if result.hint:
+                _console.print(result.hint, style="dim")
         return
     if target not in _COMPLETION_SHELLS:
         _fail(f"不支持的 shell: {target}(可选: {', '.join(sorted(_COMPLETION_SHELLS))}, install)")

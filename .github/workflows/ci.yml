@@ -85,6 +85,11 @@ jobs:
         run: uv run mypy
       - name: Tests
         run: uv run --all-packages pytest
+      # CLI 行为验收(规范面):信封 / 退出码 / 取消语义 / 补全落点 / MCP,全部走
+      # **真实进程**。unit test 用 CliRunner 在进程内调用,覆盖不到进程退出码、
+      # 非 TTY 分支、真实文件落点 —— 这里补上。
+      - name: CLI acceptance (source mode)
+        run: uv run --all-packages python scripts/accept_cli.py
       - name: Build both packages
         run: uv build --all-packages
 
@@ -192,6 +197,14 @@ jobs:
             echo "::error::Binary links Python.framework (framework-mode PyInstaller, ~14s startup). Check pyproject.toml [tool.uv] python-preference = \"only-managed\"."
             exit 1
           fi
+      # 冻结二进制的 CLI 验收。单测全绿但**发布二进制**崩过的例子:
+      # 2.11.0 及更早的 `completion install` / `--show-completion` —— typer 的补全
+      # 安装走 shellingham,而它用 `importlib.import_module(f".{os.name}")` 动态导入子
+      # 模块,PyInstaller 静态分析看不到 → 冻结点缺 `shellingham.posix`/`nt` →
+      # RuntimeError。`scripts/build.py` 已 `--collect-submodules shellingham`,
+      # 这里在「真的二进制」上把补全 / 信封 / MCP / 取消语义全跑一遍兜住回归。
+      - name: CLI acceptance (frozen binary)
+        run: uv run --package orzmc-app python scripts/accept_cli.py --cli dist/orzmc
       - name: Upload binary
         uses: actions/upload-artifact@v7
         with:

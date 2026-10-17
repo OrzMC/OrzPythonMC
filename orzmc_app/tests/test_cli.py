@@ -111,7 +111,7 @@ def test_json_error_envelope_and_exit_code() -> None:
     assert payload["ok"] is False
     assert payload["command"] == "client"
     assert payload["data"] is None
-    assert payload["error"]["code"] == "E_UNSUPPORTED"
+    assert payload["error"]["code"] == "E_UNSUPPORTED_TYPE"
 
 
 # ── completion(规范 §9)──────────────────────────────────────────────────────
@@ -189,13 +189,13 @@ def test_capabilities_reports_supported_enums() -> None:
 def test_client_rejects_server_type() -> None:
     result = runner.invoke(app, ["client", "-t", "paper", "--version", "1.20.4"])
     assert result.exit_code == 1
-    assert "不能用于客户端" in result.stdout
+    assert "不能用于客户端" in result.stderr
 
 
 def test_client_rejects_unknown_type() -> None:
     result = runner.invoke(app, ["client", "-t", "spigot", "--version", "1.20.4"])
     assert result.exit_code == 1
-    assert "未知类型" in result.stdout
+    assert "未知类型" in result.stderr
 
 
 def test_client_accepts_forge_type(monkeypatch) -> None:
@@ -383,7 +383,7 @@ class TestUpdateCommand:
         monkeypatch.setattr(app_module, "update_self", boom)
         result = runner.invoke(app, ["update"])
         assert result.exit_code == 1
-        assert "检测到 pip 安装" in result.stdout
+        assert "检测到 pip 安装" in result.stderr
 
     def test_check_error_exits_nonzero(self, monkeypatch) -> None:
         def boom(binary, version=None, channel=None, reporter=None):
@@ -392,25 +392,25 @@ class TestUpdateCommand:
         monkeypatch.setattr(app_module, "check_self_update", boom)
         result = runner.invoke(app, ["update", "--check"])
         assert result.exit_code == 1
-        assert "GitHub API 已限流" in result.stdout
+        assert "GitHub API 已限流" in result.stderr
 
 
 def test_remove_server_requires_type() -> None:
     result = runner.invoke(app, ["remove", "-v", "1.20.4", "--server"])
     assert result.exit_code == 1
-    assert "需要指定类型" in result.stdout
+    assert "需要指定类型" in result.stderr
 
 
 def test_remove_missing_version_raises(tmp_path) -> None:
     result = runner.invoke(app, ["remove", "-v", "9.9.9", "--yes", "--root-dir", str(tmp_path)])
     assert result.exit_code == 1
-    assert "未找到" in result.stdout
+    assert "未找到" in result.stderr
 
 
 def test_bad_memory_rejected() -> None:
     result = runner.invoke(app, ["client", "--minmem", "huge", "--version", "1.20.4"])
     assert result.exit_code == 1
-    assert "无效内存" in result.stdout
+    assert "无效内存" in result.stderr
 
 
 class TestDownloadThreadsOption:
@@ -439,7 +439,7 @@ class TestDownloadThreadsOption:
         for value in ("0", "-1", str(MAX_DOWNLOAD_THREADS + 1)):
             result = runner.invoke(app, ["client", "-v", "1.20.4", "-j", value])
             assert result.exit_code == 1, value
-            assert "下载并发数必须在" in result.stdout
+            assert "下载并发数必须在" in result.stderr
 
     def test_help_documents_the_flag(self) -> None:
         # 不断言渲染后的帮助文本:控制台宽度不同,rich 可能把长选项名截断成
@@ -477,7 +477,7 @@ def test_uninstall_removes_root_when_flagged(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(app_module, "uninstall_self", fake_uninstall)
-    result = runner.invoke(app, ["uninstall", "--remove-root"])
+    result = runner.invoke(app, ["uninstall", "--yes", "--remove-root"])
     assert result.exit_code == 0, result.stdout
     assert calls[0]["remove_root"] is True
 
@@ -487,9 +487,9 @@ def test_uninstall_error_fails(monkeypatch) -> None:
         raise RuntimeError("检测到疑似开发环境安装")
 
     monkeypatch.setattr(app_module, "uninstall_self", fake_uninstall)
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--yes"])
     assert result.exit_code == 1
-    assert "检测到疑似开发环境安装" in result.stdout
+    assert "检测到疑似开发环境安装" in result.stderr
 
 
 class TestForceUtf8Stdio:
@@ -602,7 +602,7 @@ def test_client_auth_without_client_id(monkeypatch) -> None:
     monkeypatch.setattr(app_module, "resolve_client_id", lambda override=None: "")
     result = runner.invoke(app, ["client", "--auth"])
     assert result.exit_code == 1
-    assert "client_id" in result.stdout
+    assert "client_id" in result.stderr
 
 
 def test_client_auth_without_client_id_json(monkeypatch) -> None:
@@ -620,3 +620,120 @@ def test_server_kill_all_json(monkeypatch) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["data"] == {"mode": "kill-all", "killed": [111, 222]}
+
+
+# ── 规范对齐:帮助选项 / 退出码 / 取消语义 / stdout 纯净 ─────────────────────
+
+
+def test_short_help_flag_everywhere() -> None:
+    """规范 §3 + ``cli-surface.json`` globalOptions:``-h`` 必须与 ``--help`` 等价。"""
+    for args in (["-h"], ["--help"], ["client", "-h"], ["server", "-h"], ["completion", "-h"]):
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0, (args, result.stdout)
+        assert "Usage" in result.stdout or "用法" in result.stdout
+
+
+def test_typer_completion_options_are_not_exposed() -> None:
+    """`add_completion=True` 只保留“补全类注册”,不暴露 typer 自带那两个重复选项。"""
+    group = cast("Any", typer.main.get_command(app))
+    names = {opt for param in group.params for opt in getattr(param, "opts", [])}
+    assert "--install-completion" not in names
+    assert "--show-completion" not in names
+    # 但动态补全(``completion <shell>`` 生成的脚本依赖它)必须还活着。
+    result = runner.invoke(
+        app,
+        [],
+        env={"_ORZMC_COMPLETE": "complete_bash", "COMP_WORDS": "orzmc cl", "COMP_CWORD": "1"},
+    )
+    assert "client" in result.stdout
+
+
+def test_usage_error_exit_code_is_one(monkeypatch) -> None:
+    """规范 §6 的退出码只有 0/1/130;click 默认给 2,``main()`` 收敛成 1。"""
+    cli_main = sys.modules["orzmc_app.cli"]
+
+    monkeypatch.setattr(sys, "argv", ["orzmc", "nope"])
+    assert cli_main.main() == 1
+
+
+def test_remove_without_yes_is_cancelled(tmp_path) -> None:
+    """规范 §8.2:缺 ``--yes`` 的非交互 ``remove`` 返回取消(130),且什么都没删。"""
+    target = tmp_path / "versions" / "1.20.4" / "client"
+    target.mkdir(parents=True)
+    result = runner.invoke(app, ["--json", "remove", "-v", "1.20.4", "--root-dir", str(tmp_path)])
+    assert result.exit_code == 130
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "E_CANCELLED"
+    assert target.is_dir()
+
+
+def test_uninstall_without_yes_is_cancelled(monkeypatch) -> None:
+    """``frontends.md`` F2:卸载必须保留二次确认 —— 非交互需显式 ``--yes``。"""
+    called: list[int] = []
+
+    def fake_uninstall(*args: object, **kwargs: object) -> bool:
+        called.append(1)
+        return True
+
+    monkeypatch.setattr(app_module, "uninstall_self", fake_uninstall)
+    result = runner.invoke(app, ["--json", "uninstall"])
+    assert result.exit_code == 130
+    assert called == []
+    assert json.loads(result.stdout)["error"]["code"] == "E_CANCELLED"
+
+
+def test_uninstall_json_keeps_stdout_clean(monkeypatch) -> None:
+    """规范 §6.1:stdout 只有一个信封 —— 库日志必须走 stderr。"""
+
+    def fake_uninstall(binary, **kwargs):
+        kwargs["reporter"].info("NOISE-FROM-LIBRARY")
+        return True
+
+    monkeypatch.setattr(app_module, "uninstall_self", fake_uninstall)
+    result = runner.invoke(app, ["--json", "uninstall", "--yes"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)  # 整段 stdout 必须是单个 JSON
+    assert payload["data"] == {"uninstalled": True}
+    assert "NOISE-FROM-LIBRARY" not in result.stdout
+
+
+# ── completion install(规范 §9 / frontends F6)──────────────────────────────
+
+
+def _sandbox_home(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    for var in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(var, str(home))
+    return home
+
+
+def test_completion_install_uses_env_shell(monkeypatch, tmp_path) -> None:
+    home = _sandbox_home(monkeypatch, tmp_path)
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.delenv("PSModulePath", raising=False)
+    result = runner.invoke(app, ["--json", "completion", "install"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["data"]["shell"] == "zsh"
+    assert payload["data"]["path"] == str(home / ".zsh/completions/_orzmc")
+    assert (home / ".zsh/completions/_orzmc").is_file()
+    # 幂等:再装一次不重复改 rc
+    assert runner.invoke(app, ["completion", "install"]).exit_code == 0
+    assert (home / ".zshrc").read_text().count("fpath+=(~/.zsh/completions)") == 1
+
+
+def test_completion_install_without_shell_is_usage_error(monkeypatch, tmp_path) -> None:
+    if os.name == "nt":  # pragma: no cover - Windows 总会兜底 powershell
+        import pytest
+
+        pytest.skip("Windows 上 resolve_shell 总会兜底 powershell")
+    _sandbox_home(monkeypatch, tmp_path)
+    monkeypatch.delenv("SHELL", raising=False)
+    monkeypatch.delenv("PSModulePath", raising=False)
+    result = runner.invoke(app, ["--json", "completion", "install"])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "E_USAGE"
+    assert "completion <shell>" in payload["error"]["message"]
