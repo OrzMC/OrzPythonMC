@@ -736,6 +736,21 @@ def build_cli(explicit: str | None) -> tuple[list[str], bool]:
     return [sys.executable, "-m", "orzmc_app.cli"], False
 
 
+def _force_utf8_stdio() -> None:
+    """Windows 控制台默认 cp1252,打印中文会 UnicodeEncodeError —— 显式切 UTF-8。
+
+    与 `accept_selfupdate.py` 同一手法;CI 的 windows runner 真的会在第一行中文上炸。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):  # pragma: no cover - 已被替换流(如测试捕获)
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="orzmc CLI 自动化验收(按规范断言)")
     parser.add_argument("--cli", help="被测可执行文件(缺省:当前解释器 -m orzmc_app.cli)")
@@ -751,6 +766,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--keep", action="store_true", help="保留沙箱目录(排障用)")
     parser.add_argument("-v", "--verbose", action="store_true", help="打印每个用例的命令与输出")
     args = parser.parse_args(argv)
+    _force_utf8_stdio()
 
     cli, frozen = build_cli(args.cli)
     state_paths = Path(args.state_paths).expanduser().resolve() if args.state_paths else None
