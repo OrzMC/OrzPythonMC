@@ -3,6 +3,18 @@
 ## [2.12.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.11.0...v2.12.0) (2026-10-17)
 
 
+### ⚠️ 升级须知（补全命令改道 / 脚本需加 --yes）
+
+- **`--install-completion` / `--show-completion` 已移除**。它们在发布二进制里依赖的 shellingham
+  动态子模块没有被 PyInstaller 收集，一用就崩（`completion install` 同样受影响）。改用：
+  - `orzmc completion install`：按 `$SHELL` 装到标准补全目录（幂等，可重复执行）；
+  - `orzmc completion <shell>`：只把脚本打印到 stdout，自行放进 rc。
+- **非交互（脚本 / 管道 / CI）下 `remove` / `uninstall` 必须显式 `--yes`**，否则按规范返回取消并退出 **130**。
+- 用法错误（未知命令 / 选项 / 缺必填）统一退出 **1**（框架默认的 2 已归一）。
+- 错误信息一律写 **stderr**；`--json` 下 stdout 只有信封（`--json` 且不带子命令 → `E_USAGE` + 退出 1）。
+- 一键安装器现在装完会**自动安装 Shell 补全**并登记进 `install.conf`（卸载时一并清理）；
+  不想装用 `--no-completion` / `ORZMC_NO_COMPLETION=1`。
+
 ### Features
 
 * **install:** install.conf 写入 surface（cli|gui，标明哪个前端装了 CLI） ([#69](https://github.com/OrzMC/OrzPythonMC/issues/69)) ([3974436](https://github.com/OrzMC/OrzPythonMC/commit/3974436e5a505e97d2e76228b25c8225447d5733))
