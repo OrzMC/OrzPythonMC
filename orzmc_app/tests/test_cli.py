@@ -159,6 +159,33 @@ def test_capabilities_lists_options() -> None:
     assert any("--version" in opt["names"] for opt in client["options"])
 
 
+def test_capabilities_reports_supported_enums() -> None:
+    """`capabilities` 必须上报**实际支持**的枚举值(父仓库 surface 校验据此比对)。"""
+    result = runner.invoke(app, ["--json", "capabilities"])
+    data = json.loads(result.stdout)["data"]
+    by_name = {command["name"]: command for command in data["commands"]}
+
+    def enum_of(command: str, option: str) -> list[str] | None:
+        entry = next(o for o in by_name[command]["options"] if option in o["names"])
+        return entry["enum"]
+
+    assert enum_of("client", "--type") == ["vanilla", "fabric", "forge"]
+    assert enum_of("server", "--type") == ["vanilla", "paper", "fabric", "forge"]
+    assert enum_of("update", "--channel") == ["release", "beta"]
+    assert enum_of("completion", "target") == [
+        "bash",
+        "zsh",
+        "fish",
+        "powershell",
+        "pwsh",
+        "install",
+    ]
+    # App Store 渠道未上架: 只声明 release(规范目标里还有 appstore, 属已声明差异)。
+    assert enum_of("app", "--channel") == ["release"]
+    # 非枚举选项必须为 null, 避免误报。
+    assert enum_of("client", "--username") is None
+
+
 def test_client_rejects_server_type() -> None:
     result = runner.invoke(app, ["client", "-t", "paper", "--version", "1.20.4"])
     assert result.exit_code == 1
