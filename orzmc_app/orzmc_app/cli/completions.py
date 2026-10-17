@@ -63,19 +63,20 @@ def normalize_shell(name: str | None) -> str | None:
     return base if base in SHELLS else None
 
 
-def resolve_shell(env: Mapping[str, str] | None = None) -> str | None:
+def resolve_shell(env: Mapping[str, str] | None = None, *, is_windows: bool | None = None) -> str | None:
     """从环境变量推断当前 shell;推断不出返回 ``None``(调用方报错让用户显式指定)。
 
     只读环境变量、**不做进程探测**(见模块 docstring 第 1 条)。
+    Windows 上 ``$SHELL`` 通常不存在,按平台兜底成 ``powershell`` —— **不能**用
+    ``PSModulePath`` 判断平台:装了 pwsh 的 Linux/macOS 也有这个变量(CI runner 就有),
+    会把 Linux 误判成 Windows。
     """
     environ = os.environ if env is None else env
     shell = normalize_shell(environ.get("SHELL"))
     if shell is not None:
         return shell
-    # Windows:PowerShell 是所有受支持 Windows 版本的默认 shell(5.1 起内置)。
-    if environ.get("PSModulePath") or os.name == "nt":
-        return "powershell"
-    return None
+    windows = os.name == "nt" if is_windows is None else is_windows
+    return "powershell" if windows else None
 
 
 def target_path(shell: str, home: Path) -> Path | None:

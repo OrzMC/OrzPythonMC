@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -43,18 +42,18 @@ class TestResolveShell:
         assert resolve_shell({"SHELL": "/bin/zsh"}) == "zsh"
 
     def test_windows_powershell_without_shell_env(self) -> None:
-        assert resolve_shell({"PSModulePath": "/x/Modules"}) == "powershell"
+        assert resolve_shell({}, is_windows=True) == "powershell"
+
+    def test_psmodulepath_does_not_make_it_windows(self) -> None:
+        # 装了 pwsh 的 Linux/macOS 也有 PSModulePath;据此判平台会把 Linux 误判成 Windows
+        # (CI runner 真踩过:ubuntu 上 `completion install` 报成 powershell)。
+        assert resolve_shell({"PSModulePath": "/x/Modules"}, is_windows=False) is None
 
     def test_unknown_shell_env_falls_through(self) -> None:
-        # 不认识 $SHELL 时:POSIX 上无 PSModulePath → None(调用方提示用户显式指定)。
-        if os.name == "nt":  # pragma: no cover - Windows 兜底成 powershell
-            pytest.skip("Windows 上 resolve_shell 总会兜底 powershell")
-        assert resolve_shell({"SHELL": "/bin/tcsh"}) is None
+        assert resolve_shell({"SHELL": "/bin/tcsh"}, is_windows=False) is None
 
     def test_empty_env(self) -> None:
-        if os.name == "nt":  # pragma: no cover
-            pytest.skip("Windows 上 resolve_shell 总会兜底 powershell")
-        assert resolve_shell({}) is None
+        assert resolve_shell({}, is_windows=False) is None
 
 
 class TestTargetPath:

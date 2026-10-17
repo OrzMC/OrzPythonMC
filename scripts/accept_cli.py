@@ -531,9 +531,12 @@ def case_completion_script_only(ctx: Context) -> None:
 
 @case("completion", "install-without-shell-is-usage-error")
 def case_completion_install_no_shell(ctx: Context) -> None:
+    # PSModulePath 也去掉:装了 pwsh 的 Linux/macOS 也有它,不能拿它判平台。
+    result = ctx.run("--json", "completion", "install", drop_env=("SHELL", "PSModulePath"))
     if os.name == "nt":
-        return  # Windows:resolve_shell 兜底 powershell
-    result = ctx.run("--json", "completion", "install", drop_env=("SHELL",))
+        # Windows 上没有 $SHELL 时按平台兜底 powershell,再按 F6 报「不支持自动安装」。
+        expect_error(result, "completion", "E_UNSUPPORTED")
+        return
     payload = expect_error(result, "completion", "E_USAGE")
     error = payload["error"]
     assert isinstance(error, dict)
