@@ -201,9 +201,9 @@ jobs:
 
   # End-to-end installer check on all 6 platforms: build the binary locally,
   # install via the one-line installer (--file seam + hermetic env so we never
-  # touch the real PATH/rc/user dirs), run `orzmc self-uninstall --yes`, and
+  # touch the real PATH/rc/user dirs), run `orzmc uninstall --yes`, and
   # assert the binary + install manifest are gone. Push-only like `binary`:
-  # the latest released binary predates self-uninstall, so e2e must use a
+  # the latest released binary predates uninstall, so e2e must use a
   # local build (the "chicken-and-egg" seam) rather than pulling a release.
   installer:
     needs: quality
@@ -249,7 +249,7 @@ jobs:
       # --file into an isolated temp dir → update --check → update --file (the
       # detached helper really swaps the binary) → real release download →
       # failure path → dev guard → piped entry (irm | iex / curl | sh, served
-      # with GitHub-Pages-like content types) → self-uninstall. PATH / shell rc
+      # with GitHub-Pages-like content types) → uninstall. PATH / shell rc
       # / user dirs are never touched.
       - name: Installer + self-update e2e (Unix)
         if: runner.os != 'Windows'

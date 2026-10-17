@@ -99,11 +99,11 @@ OrzMC 一键安装器(Windows / PowerShell 5.1+)
   -no-modify-rc     不修改用户 PATH(仅打印手动提示)
   -file <path>      从本地文件安装(测试 / 开发用)
   -uninstall        反向卸载:读 manifest 删二进制 + 还原 PATH(不删游戏数据;
-                    常规卸载请用内置的 orzmc self-uninstall)
+                    常规卸载请用内置的 orzmc uninstall)
   -help             显示本帮助
 
 卸载(内置,推荐):
-  orzmc self-uninstall [--yes] [--remove-root] [--force]
+  orzmc uninstall [--yes] [--remove-root] [--force]
 
 升级(内置,也可重跑本命令覆盖安装):
   orzmc update [--check] [-v vX.Y.Z]
@@ -307,15 +307,15 @@ function Do-Install {
         Write-Host "  在「系统属性 → 环境变量」的用户 Path 中追加 $($script:InstallDir)"
     }
     Write-Host '升级:orzmc update(或重新执行本命令覆盖安装)。'
-    Write-Host '卸载: orzmc self-uninstall --yes(游戏数据默认保留;--remove-root 连 ~\minecraft 一起删)'
+    Write-Host '卸载: orzmc uninstall --yes(游戏数据默认保留;--remove-root 连 ~\minecraft 一起删)'
 }
 
-# ── 卸载(shell 兜底;常规卸载请用 orzmc self-uninstall)──────────────────────
+# ── 卸载(shell 兜底;常规卸载请用 orzmc uninstall)──────────────────────
 function Do-Uninstall {
     $script:StateDir = Join-Path (State-Base) 'orzmc'
     $script:Manifest = Join-Path $script:StateDir 'install.conf'
     if (-not (Test-Path $script:Manifest)) {
-        Write-Host "未找到安装记录($script:Manifest)。若已安装,请运行 orzmc self-uninstall 或手动删除。"
+        Write-Host "未找到安装记录($script:Manifest)。若已安装,请运行 orzmc uninstall 或手动删除。"
         return
     }
     $fields = @{}

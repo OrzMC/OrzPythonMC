@@ -54,11 +54,11 @@ OrzMC 一键安装器(macOS / Linux)
   --no-modify-rc     不修改 shell 配置文件(仅打印手动 export 提示)
   --file <path>      从本地文件安装(测试 / 开发用)
   --uninstall        反向卸载:读 manifest 删二进制 + 还原 PATH(不删游戏数据;
-                     常规卸载请用内置的 orzmc self-uninstall)
+                     常规卸载请用内置的 orzmc uninstall)
   --help             显示本帮助
 
 卸载(内置,推荐):
-  orzmc self-uninstall [--yes] [--remove-root] [--force]
+  orzmc uninstall [--yes] [--remove-root] [--force]
 
 升级(内置,也可重跑本命令覆盖安装):
   orzmc update [--check] [-v vX.Y.Z]
@@ -296,15 +296,15 @@ do_install() {
         echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
     fi
     echo "升级:orzmc update(或重新执行本命令覆盖安装)。"
-    echo "卸载: orzmc self-uninstall --yes(游戏数据默认保留;--remove-root 连 ~/minecraft 一起删)"
+    echo "卸载: orzmc uninstall --yes(游戏数据默认保留;--remove-root 连 ~/minecraft 一起删)"
 }
 
-# ── 卸载(shell 兜底;常规卸载请用 orzmc self-uninstall)──────────────────────
+# ── 卸载(shell 兜底;常规卸载请用 orzmc uninstall)──────────────────────
 do_uninstall() {
     STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/orzmc"
     MANIFEST="$STATE_DIR/install.conf"
     if [ ! -f "$MANIFEST" ]; then
-        echo "未找到安装记录($MANIFEST)。若已安装,请运行 orzmc self-uninstall 或手动删除二进制。"
+        echo "未找到安装记录($MANIFEST)。若已安装,请运行 orzmc uninstall 或手动删除二进制。"
         exit 0
     fi
     BIN="$(sed -n 's/^binary=//p' "$MANIFEST" | head -n1)"
