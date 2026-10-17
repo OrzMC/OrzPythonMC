@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.10.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.9.1...v2.10.0) (2026-10-17)
+
+
+### Features
+
+* **cli:** 卸载命令 self-uninstall → uninstall（规范先行） ([#66](https://github.com/OrzMC/OrzPythonMC/issues/66)) ([3c061cb](https://github.com/OrzMC/OrzPythonMC/commit/3c061cb3e5a6b069f1cb41509a04bb001c5e571f))
+
+
+### Bug Fixes
+
+* **cli:** 版本声明改多行、去联系邮箱（由合规单一事实源生成） ([#64](https://github.com/OrzMC/OrzPythonMC/issues/64)) ([b332bfb](https://github.com/OrzMC/OrzPythonMC/commit/b332bfb4e40912477bf906acd2621749db4b71ac))
+
 ## [2.9.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.9.0...v2.9.1) (2026-10-16)
 
 
