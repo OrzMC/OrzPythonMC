@@ -13,9 +13,14 @@ import pytest
 from fakes import FakeReporter
 
 from orzmc import InstallManifest as PublicInstallManifest
-from orzmc import uninstall_self
+from orzmc import record_completion_file, uninstall_self
 from orzmc.infra.fs import FileStore
-from orzmc.services.selfinstall import InstallManifest, SelfUninstaller, default_state_dir, running_binary
+from orzmc.services.selfinstall import (
+    InstallManifest,
+    SelfUninstaller,
+    default_state_dir,
+    running_binary,
+)
 
 skip_windows = pytest.mark.skipif(os.name == "nt", reason="Unix-only behavior")
 skip_unix = pytest.mark.skipif(os.name != "nt", reason="Windows-only behavior")
@@ -139,6 +144,19 @@ class TestInstallManifest:
         fs.write_text(legacy, "tool=orzmc\nschema=1\nbinary=/x/orzmc\nroot_dir=/x/mc\n")
         assert InstallManifest.read(fs, legacy).surface is None
 
+    def test_completion_file_roundtrip(self, tmp_path) -> None:
+        """`frontends.md` F2 / `install-update.md` §3:补全落点进 manifest,卸载据此清理。"""
+        fs = FileStore()
+        path = str(tmp_path / "install.conf")
+        manifest = InstallManifest(
+            binary="/x/orzmc",
+            install_dir="/x",
+            completion_file="/home/u/.zsh/completions/_orzmc",
+        )
+        manifest.write(fs, path)
+        assert fs.read_text(path).endswith("completion_file=/home/u/.zsh/completions/_orzmc\n")
+        assert InstallManifest.read(fs, path).completion_file == "/home/u/.zsh/completions/_orzmc"
+
     def test_update_replace_keeps_surface(self) -> None:
         """`update` rewrites version/platform/source only; `surface` must survive."""
         from dataclasses import replace
@@ -162,6 +180,12 @@ class TestInstallManifest:
         assert manifest.binary == "/x/orzmc"
         assert manifest.source is None
         assert manifest.path_file is None
+
+    def test_omits_completion_file_when_none(self, tmp_path) -> None:
+        fs = FileStore()
+        path = str(tmp_path / "install.conf")
+        InstallManifest(binary="/x/orzmc", install_dir="/x").write(fs, path)
+        assert "completion_file=" not in fs.read_text(path)
 
     def test_values_keep_equals_and_spaces(self) -> None:
         manifest = InstallManifest.from_lines(['path_line=export PATH="/a b/bin:$PATH"'])
@@ -533,3 +557,42 @@ class TestRunningBinary:
         real.write_text("x")
         resolved = running_binary("orzmc", executable=str(real), frozen=False, which=lambda _n: str(decoy))
         assert resolved == os.path.realpath(str(real))
+
+
+class TestCompletionRecording:
+    """`completion install` 登记路径 → `uninstall` 删掉它(`frontends.md` F2)。"""
+
+    def test_record_writes_into_existing_manifest(self, state_dir, tmp_path) -> None:
+        fs = FileStore()
+        binary = str(tmp_path / "bin" / "orzmc")
+        fs.write_text(binary, "x")
+        _seed(fs, state_dir, binary=binary)
+
+        script = str(tmp_path / "completions" / "_orzmc")
+        fs.write_text(script, "# completion")
+
+        assert record_completion_file(script, binary=binary) is True
+        found = InstallManifest.find(fs, binary=binary)
+        assert found is not None
+        assert found[1].completion_file == script
+        # 其他字段必须原样保留(只改 completion_file)
+        assert found[1].version == "v2.0.1"
+        assert found[1].source == "https://example.com/orzmc-macos-arm64"
+
+    def test_record_without_manifest_is_noop(self, tmp_path) -> None:
+        binary = str(tmp_path / "bin" / "orzmc")
+        FileStore().write_text(binary, "x")
+        assert record_completion_file(str(tmp_path / "_orzmc"), binary=binary) is False
+
+    def test_uninstall_removes_recorded_completion(self, state_dir, tmp_path) -> None:
+        fs = FileStore()
+        binary = str(tmp_path / "bin" / "orzmc")
+        fs.write_text(binary, "x")
+        _seed(fs, state_dir, binary=binary)
+        script = str(tmp_path / "completions" / "_orzmc")
+        fs.write_text(script, "# completion")
+        record_completion_file(script, binary=binary)
+
+        assert uninstall_self(binary, yes=True) is True
+        assert not fs.exists(script)
+        assert not fs.exists(os.path.dirname(script))  # 空目录一并 rmdir

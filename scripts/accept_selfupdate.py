@@ -402,6 +402,54 @@ def step_install(sandbox: Sandbox, powershell: str) -> None:
     check("安装记录已写入 state 目录", "version=local-build" in record, f"{sandbox.manifest.parent.name}/install.conf")
 
 
+def step_installer_completion(sandbox: Sandbox, powershell: str) -> None:
+    """安装器自动装补全 + 登记 completion_file + 卸载清理(install-update §5 / frontends F2)。
+
+    ``step_install`` 故意带 ``--no-modify-rc``(不碰 rc);这里单独跑一次**不带**它的安装,
+    并把 HOME 也关进沙箱 —— 补全落点与 rc 行都只会写进沙箱,碰不到真实用户目录。
+    """
+    say("== 3b) 安装器自动装补全 + 登记 completion_file + 卸载清理 ==")
+    home = sandbox.root / "home-completion"
+    install_dir = sandbox.root / "bin-completion"
+    state_base = sandbox.root / "state-completion"
+    game_root = sandbox.root / "minecraft-completion"
+    home.mkdir(parents=True, exist_ok=True)
+    env = {
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "XDG_STATE_HOME": str(state_base),
+        "LOCALAPPDATA": str(state_base),
+        "ORZMC_ROOT_DIR": str(game_root),
+        "SHELL": "/bin/zsh",
+    }
+    record = state_base / "orzmc" / "install.conf"
+    if IS_WINDOWS:
+        # F6:powershell/pwsh 只生成脚本、不落盘 → Windows 安装器不写 completion_file。
+        # CI 上不能跑「不带 -no-modify-rc」的 Windows 安装(会改 runner 的真实 User PATH),
+        # 故显式带上它,只断言 completion_file 不出现。
+        body = f"& '{ROOT / 'docs' / 'install.ps1'}' -file '{BUILT_BINARY}' -dir '{install_dir}' -no-modify-rc"
+        result = run(ps_command(powershell, body), env=env)
+        content = record.read_text(encoding="utf-8-sig") if record.is_file() else ""
+        check("Windows 安装器成功", result.returncode == 0, plain(result.stdout + result.stderr).strip())
+        check("Windows 安装记录不含 completion_file(规范 F6)", "completion_file=" not in content, content)
+        run([str(install_dir / "orzmc.exe"), "uninstall", "--yes"], env=env)
+        return
+
+    result = run(
+        ["sh", str(ROOT / "docs" / "install.sh"), "--file", str(BUILT_BINARY), "--dir", str(install_dir)],
+        env=env,
+    )
+    out = plain(result.stdout + result.stderr)
+    check("安装器成功(含补全)", result.returncode == 0, out.strip())
+    content = record.read_text(encoding="utf-8-sig") if record.is_file() else ""
+    expected = home / ".zsh" / "completions" / "_orzmc"
+    check("安装记录登记 completion_file", f"completion_file={expected}" in content, content)
+    check("补全脚本已落盘", expected.is_file(), out.strip())
+    uninstall = run([str(install_dir / "orzmc"), "uninstall", "--yes"], env=env)
+    check("卸载成功", uninstall.returncode == 0, plain(uninstall.stdout + uninstall.stderr).strip())
+    check("卸载删掉了补全脚本(F2)", not expected.is_file(), str(expected))
+
+
 def step_check(sandbox: Sandbox, tag: str) -> str:
     """``--check`` in both flavours.
 
@@ -691,6 +739,7 @@ def main(argv: list[str] | None = None) -> int:
         step_build(args.skip_build)
         step_shell_info(sandbox, shell, args.expect_ps_major)
         step_install(sandbox, shell)
+        step_installer_completion(sandbox, shell)
         latest = step_check(sandbox, tag)
         step_swap_from_file(sandbox)
         step_bare_name(sandbox, shell)

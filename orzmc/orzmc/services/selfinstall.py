@@ -15,7 +15,7 @@ import os
 import shutil
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from orzmc.domain.paths import DEFAULT_ROOT
@@ -114,13 +114,40 @@ def schedule_delete_on_reboot(path: str) -> bool:
         return False
 
 
+def record_completion_file(
+    completion_path: str,
+    *,
+    binary: str | None = None,
+    fs: FileStore | None = None,
+) -> bool:
+    """把刚安装的补全脚本路径写进安装记录,供 ``uninstall`` 清理。
+
+    Returns ``False`` when there is no install record (dev run / venv / 未用安装器),
+    in which case there is nothing to register — the script still works, it just
+    won't be removed by ``orzmc uninstall``.
+    """
+    store = fs or FileStore()
+    found = InstallManifest.find(store, binary)
+    if found is None:
+        return False
+    path, manifest = found
+    if manifest.completion_file == completion_path:
+        return True
+    replace(manifest, completion_file=completion_path).write(store, path)
+    return True
+
+
 @dataclass(frozen=True)
 class InstallManifest:
     """Install record written by the one-line installer (key=value lines).
 
-    Optional fields (``source`` / ``path_file`` / ``path_line`` / ``surface``)
-    are omitted from the file when ``None``; values are everything after the
-    first ``=``.
+    Optional fields (``source`` / ``path_file`` / ``path_line`` / ``surface`` /
+    ``completion_file``) are omitted from the file when ``None``; values are
+    everything after the first ``=``.
+
+    ``completion_file`` is written by ``orzmc completion install`` so
+    ``uninstall`` can delete the script it installed
+    (`docs/spec/install-update.md` §3/§5, `frontends.md` F2).
 
     ``surface`` (``cli`` / ``gui``) records **which front end wrote this record**,
     used for identity checks in `docs/spec/install-update.md` §3.1; ``None`` means
@@ -138,6 +165,7 @@ class InstallManifest:
     path_line: str | None = None
     root_dir: str = DEFAULT_ROOT
     surface: str | None = None
+    completion_file: str | None = None
 
     # ── serialization ──────────────────────────────────────────────────────
 
@@ -159,6 +187,8 @@ class InstallManifest:
         lines.append(f"root_dir={self.root_dir}")
         if self.surface is not None:
             lines.append(f"surface={self.surface}")
+        if self.completion_file is not None:
+            lines.append(f"completion_file={self.completion_file}")
         return lines
 
     @classmethod
@@ -185,6 +215,7 @@ class InstallManifest:
             path_line=fields.get("path_line"),
             root_dir=fields.get("root_dir", DEFAULT_ROOT),
             surface=fields.get("surface"),
+            completion_file=fields.get("completion_file"),
         )
 
     # ── persistence ────────────────────────────────────────────────────────
@@ -261,6 +292,8 @@ class SelfUninstaller:
         manifest_path, manifest = found
         if self._restore_path(manifest):
             self._reporter.info("已还原 PATH 配置")
+        if self._remove_completion(manifest):
+            self._reporter.info("已删除补全脚本")
         self._fs.remove(manifest_path)
         self._prune_empty(os.path.dirname(manifest_path))
         self._handle_root(root, remove_root=remove_root, yes=yes, confirm=confirm)
@@ -282,6 +315,19 @@ class SelfUninstaller:
         if os.name == "nt" and manifest.path_line:
             return self._restore_windows_path(manifest)
         return False
+
+    def _remove_completion(self, manifest: InstallManifest) -> bool:
+        """删除 `completion install` 登记过的补全脚本(只删自己登记过的那一个)。
+
+        `frontends.md` F2 / `install-update.md` §9:卸载要顺带清掉补全文件,
+        否则 `orzmc` 删了、shell 里还留着指向不存在文件的补全。
+        """
+        path = manifest.completion_file
+        if not path or not self._fs.is_file(path):
+            return False
+        self._fs.remove(path)
+        self._prune_empty(os.path.dirname(path))
+        return True
 
     def _remove_line_from_file(self, path: str, line: str) -> bool:
         """Remove the exact recorded line from a shell rc file (never a regex)."""

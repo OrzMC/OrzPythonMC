@@ -100,7 +100,7 @@ def test_tools_call_business_error_is_tool_error() -> None:
     assert result["isError"] is True
     envelope = _envelope(response)
     assert envelope["ok"] is False
-    assert envelope["error"]["code"] == "E_UNSUPPORTED"
+    assert envelope["error"]["code"] == "E_UNSUPPORTED_TYPE"
 
 
 def test_tools_call_app_argument_maps_to_positional(tmp_path) -> None:

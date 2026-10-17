@@ -7,7 +7,7 @@
 #   & ([scriptblock]::Create($code)) -version vX.Y.Z
 # 或下载到本地后直接执行:
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -version vX.Y.Z
-# 其它选项:-dir <path> / -no-modify-rc / -file <path>(本地安装,测试接缝)/ -uninstall / -help。
+# 其它选项:-dir <path> / -no-modify-rc / -no-completion / -file <path>(本地安装,测试接缝)/ -uninstall / -help。
 #
 # 设计约束:
 #   * 不用 param() 块——兼容 `irm | iex`(脚本内容被求值时无脚本参数表);
@@ -63,6 +63,8 @@ else { $ApiLatest = "https://api.github.com/repos/$Repo/releases/latest" }
 $script:Version = ''
 $script:Dir = ''
 $script:NoRc = $false
+$script:NoCompletion = $false
+$script:CompletionFile = ''
 $script:File = ''
 $script:Mode = 'install'
 $script:Url = ''
@@ -96,7 +98,8 @@ OrzMC 一键安装器(Windows / PowerShell 5.1+)
 选项:
   -version vX.Y.Z   安装指定版本(绕过 GitHub API 限流)
   -dir <path>       自定义安装目录(默认 %LOCALAPPDATA%\Programs\orzmc)
-  -no-modify-rc     不修改用户 PATH(仅打印手动提示)
+  -no-modify-rc     不修改用户 PATH(仅打印手动提示;也不再自动装补全)
+  -no-completion    不自动安装 Shell 补全(等价 ORZMC_NO_COMPLETION=1;Windows 默认就不落盘)
   -file <path>      从本地文件安装(测试 / 开发用)
   -uninstall        反向卸载:读 manifest 删二进制 + 还原 PATH(不删游戏数据;
                     常规卸载请用内置的 orzmc uninstall)
@@ -278,6 +281,7 @@ function Write-Manifest {
     # 哪个前端装了 CLI(docs/spec/install-update.md §3.1):GUI 触发时传 ORZMC_SURFACE=gui
     $surface = if ($env:ORZMC_SURFACE -in @('cli', 'gui')) { $env:ORZMC_SURFACE } else { 'cli' }
     $lines += "surface=$surface"
+    if ($script:CompletionFile) { $lines += "completion_file=$($script:CompletionFile)" }
     # PS 5.1 Set-Content -Encoding UTF8 写 BOM;库侧 utf-8-sig 读取,兼容。
     Set-Content -Path $script:Manifest -Value $lines -Encoding UTF8
 }
@@ -298,6 +302,13 @@ function Do-Install {
     Resolve-Url
     Download
     Install-Binary
+    # Shell 补全:规范 install-update.md §5 要求安装器装完自动装补全,但 `frontends.md` F6
+    # 规定 powershell/pwsh **只生成脚本、不落盘** —— Windows 上 `orzmc completion install`
+    # 会明确返回 E_UNSUPPORTED,故这里不调用(因此也不写 completion_file)。
+    # -no-completion / ORZMC_NO_COMPLETION=1 已解析,留给未来 F6 放开时使用:
+    #   & $script:Binary completion install
+    #   $script:CompletionFile = '<补全脚本落点>'
+    $script:CompletionFile = ''
     Register-Path
     Write-Manifest
 
@@ -365,6 +376,7 @@ try {
             '^-h$|^-help$|^--help$' { $script:Mode = 'help'; $i = $script:ArgList.Count; continue }
             '^-uninstall$|^--uninstall$' { $script:Mode = 'uninstall' }
             '^-no-modify-rc$|^--no-modify-rc$' { $script:NoRc = $true }
+            '^-no-completion$|^--no-completion$' { $script:NoCompletion = $true }
             '^-version$|^--version$' {
                 $i++
                 if ($i -ge $script:ArgList.Count) { die '-version 需要一个参数(如 -version vX.Y.Z)' }

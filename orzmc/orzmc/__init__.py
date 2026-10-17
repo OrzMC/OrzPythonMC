@@ -33,10 +33,15 @@ from orzmc.services.backup import Backup
 from orzmc.services.client import ClientService
 from orzmc.services.context import AppContext, Services
 from orzmc.services.plugins import DEFAULT_PLUGINS, PluginService
-from orzmc.services.selfinstall import InstallManifest, SelfUninstaller, running_binary
+from orzmc.services.selfinstall import (
+    InstallManifest,
+    SelfUninstaller,
+    record_completion_file,
+    running_binary,
+)
 from orzmc.services.selfupdate import SelfUpdater, UpdateCheck
 from orzmc.services.server import ServerService
-from orzmc.services.versions import InstalledVersion, VersionManager
+from orzmc.services.versions import InstalledVersion, VersionManager, VersionNotFoundError
 from orzmc.version import __version__
 
 __all__ = [
@@ -78,6 +83,7 @@ __all__ = [
     "UpdateCheck",
     "VersionEntry",
     "VersionManager",
+    "VersionNotFoundError",
     # versions
     "__version__",
     "authenticate",
@@ -94,6 +100,7 @@ __all__ = [
     # entry points
     "launch_client",
     "list_versions",
+    "record_completion_file",
     "remote_version_catalog",
     "remote_versions",
     "remove_version",
