@@ -3,6 +3,21 @@
 ## [2.9.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.9.0...v2.9.1) (2026-10-16)
 
 
+### ⚠️ 升级须知（2.9.1 之前的所有版本都必须先按下面方式「过河」）
+
+`2.9.0` 及更早版本存在自升级 bug：以**裸名**（经 `PATH`）执行 `orzmc update` 时，会把**当前工作目录**下的同名文件当成目标 —— 新二进制落在那里，**真正安装的 `orzmc` 不会被替换**（`orzmc version` 仍是旧版），而安装记录 `install.conf` 却已被改写成新版本，看起来“已是最新”。
+
+所以 **`2.9.0` 及更早版本无法用裸名 `orzmc update` 升到本版本**，请任选其一（做一次即可）：
+
+- **用绝对路径执行一次（推荐）**
+  - macOS / Linux: `~/.local/bin/orzmc update --yes`
+  - Windows（PowerShell）: `& "$env:LOCALAPPDATA\Programs\orzmc\orzmc.exe" update --yes`
+- 重跑一键安装器: <https://orzmc.github.io/OrzPythonMC/>
+- 从本 Release 下载对应平台资产手动覆盖
+
+升级到 `2.9.1` 后即自带修复，此后再用裸名 `orzmc update` 一切正常。
+
+
 ### Bug Fixes
 
 * orzmc update 别把 CWD 同名文件当目标（裸名 argv[0] 解析） ([#60](https://github.com/OrzMC/OrzPythonMC/issues/60)) ([cec60a8](https://github.com/OrzMC/OrzPythonMC/commit/cec60a8b0f10c8a38b077ca78335579993abbf7c))
