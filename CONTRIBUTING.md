@@ -63,6 +63,46 @@ gh workflow run release.yml --ref main -f tag=vX.Y.Z
 
 两条路都走同一套护栏(`verify`:tag == 代码版本、tag 在 main 上)与原子发布(draft → 二进制 → PyPI → 可见)。
 
+### 升级须知:用户需要手动操作时,必须写进 CHANGELOG 与 Release notes
+
+release-please 只把 Conventional Commits 渲染成「Features / Bug Fixes」清单,**它不会告诉用户「该怎么办」**。所以当一次发版包含**需要用户手动处理**的内容时,必须在 release PR 里**手工**给该版本条目顶部加一段 `### ⚠️ 升级须知`,并在合并后同步到 GitHub Release notes,否则用户只看得到「修了什么」,不知道「怎么升级/迁移」。
+
+触发条件(满足任一即必须写):
+
+- **修好了自升级 / 安装器自身的 bug** —— 旧版本无法自动升级到该版本,必须给出**绝对路径**等手动「过河」方式(2.9.1 就是这种情况);
+- 破坏性 / 不兼容变更:配置、数据布局、命令名、API 的变更与迁移步骤;
+- 需要用户改环境(重装依赖、换 JDK、迁移目录等);
+- 已知问题与规避办法(workaround)。
+
+写法(照抄结构,内容按实际情况改):
+
+~~~markdown
+### ⚠️ 升级须知(一句话说清影响面)
+
+<为什么会这样 + 用户会观察到什么现象>
+
+请任选其一(做一次即可):
+- **用绝对路径执行一次(推荐)**
+  - macOS / Linux:`~/.local/bin/orzmc update --yes`
+  - Windows(PowerShell):`& "$env:LOCALAPPDATA\Programs\orzmc\orzmc.exe" update --yes`
+- 重跑一键安装器:<https://orzmc.github.io/OrzPythonMC/>
+- 从本 Release 下载对应平台资产手动覆盖
+
+升级到 <版本> 后即自带修复,此后正常。
+~~~
+
+同步到 Release notes(合并后用同一段文字加到机器人生成的正文前面):
+
+```bash
+gh release view vX.Y.Z --json body --jq .body > /tmp/orig.md   # 保留机器人生成的正文
+cat advisory.md /tmp/orig.md > /tmp/new.md                     # advisory.md 里是上面的「升级须知」
+gh release edit vX.Y.Z --notes-file /tmp/new.md
+```
+
+注意:release-please 更新 CHANGELOG 时**只在前部插入新版本条目、保留已有内容**,所以手工加在**已发布**版本条目里的文字不会被覆盖;若要改的是**尚未发布**的版本,请在 release PR 里改,或合并后按上面方式补。
+
+> 首个例子:2.9.1(自升级 bug) —— 见 `CHANGELOG.md` 与 v2.9.1 的 Release notes。
+
 ### 「假 release PR」:已从流程上消除(出现仍然直接关掉)
 
 症状:合并 release PR 后,机器人立刻又开出一个 changelog 里塞满几个月前**早已发布**提交的 PR(2.3.0 后出现过 `chore(main): release 2.4.0`,2.4.0 后又出现过 `chore(main): release 2.5.0`)。
