@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 
-from orzmc._compliance import disclaimer_line
+from orzmc._compliance import disclaimer_line, disclaimer_text
 from orzmc.core.auth import DEFAULT_CLIENT_ID
 from orzmc.core.mojang import VersionEntry
 from orzmc.domain.auth import AuthSession, DeviceCode
@@ -86,6 +86,7 @@ __all__ = [
     "check_self_update",
     "deploy_server",
     "disclaimer_line",
+    "disclaimer_text",
     "game_args",
     "install_java",
     "jvm_args",

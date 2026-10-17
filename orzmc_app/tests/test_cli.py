@@ -10,8 +10,9 @@ from typing import Any, cast
 import typer
 from typer.testing import CliRunner
 
-from orzmc import DEFAULT_DOWNLOAD_THREADS, MAX_DOWNLOAD_THREADS, FileStore, UpdateCheck, disclaimer_line
+from orzmc import DEFAULT_DOWNLOAD_THREADS, MAX_DOWNLOAD_THREADS, FileStore, UpdateCheck, disclaimer_text
 from orzmc import __version__ as lib_version
+from orzmc._compliance import DISCLAIMER_EN, DISCLAIMER_ZH, TRADEMARK_ZH
 from orzmc_app import __version__
 from orzmc_app.cli import app
 
@@ -78,9 +79,23 @@ def test_json_version_envelope() -> None:
     assert json.loads(result.stdout) == {
         "ok": True,
         "command": "version",
-        "data": {"tool": __version__, "library": lib_version, "disclaimer": disclaimer_line()},
+        "data": {"tool": __version__, "library": lib_version, "disclaimer": disclaimer_text()},
         "error": None,
     }
+
+
+def test_version_text_is_multi_line_and_email_free() -> None:
+    """人类可读 `version`: 版本与声明分开、中英各占一行、不泄露邮箱。"""
+    text = disclaimer_text()
+    assert text.splitlines() == [DISCLAIMER_EN, DISCLAIMER_ZH, TRADEMARK_ZH]
+    assert "@" not in text
+
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0
+    out = result.stdout
+    assert f"orzmc {__version__} (库 {lib_version})" in out
+    assert f"{DISCLAIMER_EN}\n{DISCLAIMER_ZH}\n{TRADEMARK_ZH}" in out  # 中英不混排
+    assert "@" not in out  # 声明不再带联系邮箱
 
 
 def test_json_list_envelope(tmp_path) -> None:
