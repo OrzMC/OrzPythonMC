@@ -386,8 +386,8 @@ def remove(
             _console.print("[yellow]已取消移除[/yellow]")
 
 
-@app.command("self-uninstall")
-def self_uninstall(
+@app.command("uninstall")
+def uninstall(
     ctx: typer.Context,
     yes: Annotated[bool, typer.Option("--yes", help="跳过确认(游戏数据默认保留)")] = False,
     remove_root: Annotated[
@@ -398,11 +398,11 @@ def self_uninstall(
 ) -> None:
     """卸载工具本身:删除二进制、还原 PATH、可选删除游戏数据。
 
-    与 ``remove``(移除 Minecraft 版本)不同,``self-uninstall`` 删除的是
+    与 ``remove``(移除 Minecraft 版本)不同,``uninstall`` 删除的是
     ``orzmc`` 自身。游戏数据默认保留;``--remove-root`` 连 ``~/minecraft`` 一起删。
     """
     binary = running_binary()
-    _begin("self-uninstall", ctx)
+    _begin("uninstall", ctx)
     root_dir = root_dir or ctx.obj.get("root_dir")
     try:
         uninstalled = uninstall_self(
@@ -438,7 +438,7 @@ def update(
 
     不带参数时查询 GitHub 最新发布并覆盖当前二进制;``-v/--version`` 指定版本
     (也是 GitHub API 限流时的回退),``--check`` 只检查,``--file`` 用本地文件。
-    卸载请用 ``self-uninstall``,Minecraft 版本管理请用 ``list`` / ``remove``。
+    卸载请用 ``uninstall``,Minecraft 版本管理请用 ``list`` / ``remove``。
     """
     binary = running_binary()
     if channel not in ("release", "beta"):

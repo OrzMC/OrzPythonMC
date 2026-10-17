@@ -13,7 +13,7 @@ def default_state_dir() -> str:
     """Per-user state dir (install manifest / auth token cache), platform-aware.
 
     Honors ``XDG_STATE_HOME`` (Unix) / ``LOCALAPPDATA`` (Windows) so the
-    installer, ``self-uninstall`` and the auth token store agree on where
+    installer, ``uninstall`` and the auth token store agree on where
     per-user state lives, and so CI can redirect state into a temp dir for a
     hermetic run.
     """

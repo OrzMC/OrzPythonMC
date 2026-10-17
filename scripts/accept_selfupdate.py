@@ -23,7 +23,7 @@ PowerShell flavour — ``powershell`` 5.1 and ``pwsh`` 7.x):
    ``.ps1``, which is what makes PS 5.1 mis-decode the source unless the
    encoding self-heal kicks in; the check requires correctly decoded Chinese
    and a forwarded ``-file/-dir`` argument set (``--skip-oneline`` opts out),
-10. ``self-uninstall --yes`` removes both the binary and the install record.
+10. ``uninstall --yes`` removes both the binary and the install record.
 
 Why the swap is deferred (validated here, not just documented): a running
 PyInstaller onefile binary reads its PYZ lazily from ``<executable>?<offset>``,
@@ -641,10 +641,10 @@ def _check_piped(result: subprocess.CompletedProcess[str], install_dir: Path, st
 
 
 def step_uninstall(sandbox: Sandbox) -> None:
-    say("== 10) 卸载闭环(self-uninstall) ==")
-    result = sandbox.orzmc("self-uninstall", "--yes")
+    say("== 10) 卸载闭环(uninstall) ==")
+    result = sandbox.orzmc("uninstall", "--yes")
     out = plain(result.stdout + result.stderr)
-    check("self-uninstall 成功", result.returncode == 0, out.strip())
+    check("uninstall 成功", result.returncode == 0, out.strip())
     # Windows cannot delete the running image (its bootloader parent still holds
     # it open); the documented fallback is rename + delete-on-reboot, which the
     # library reports. Accept either — this is the behaviour AGENTS.md specifies.

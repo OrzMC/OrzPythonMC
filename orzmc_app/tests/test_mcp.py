@@ -57,7 +57,7 @@ def test_tools_list_excludes_meta_commands() -> None:
     tools = _tool_result(_call(_request("tools/list")))["tools"]
     names = {tool["name"] for tool in tools}
     assert {"client", "server", "list", "app", "remove"} <= names
-    assert names.isdisjoint({"capabilities", "completion", "mcp", "self-uninstall"})
+    assert names.isdisjoint({"capabilities", "completion", "mcp", "uninstall"})
 
 
 def test_tools_list_schema_shapes() -> None:

@@ -77,12 +77,12 @@ orzmc update --file ./orzmc -v v2.1.0   # 离线用本地二进制升级
 **内置统一卸载(推荐)**
 
 ```bash
-orzmc self-uninstall [--yes] [--remove-root] [--force]
+orzmc uninstall [--yes] [--remove-root] [--force]
 ```
 
 - 删除 orzmc 二进制、还原安装器登记的 PATH 修改、清理空目录。
 - 游戏数据(默认 `~/minecraft`)默认保留;`--remove-root` 连游戏数据一起删;`--yes` 免确认(脚本化调用)。
-- 与 `orzmc remove`(移除某个 **Minecraft 版本**)不同,`self-uninstall` 卸载的是**工具本身**。
+- 与 `orzmc remove`(移除某个 **Minecraft 版本**)不同,`uninstall` 卸载的是**工具本身**。
 
 **按安装方式手动卸载(备用)**
 
@@ -132,7 +132,7 @@ orzmc server   [-v VER] [-t vanilla|paper|fabric|forge] [-m MIN] [-x MAX]
                [--online-mode] [--kill-all] [--refresh] [-j THREADS] [--root-dir DIR]
 orzmc remove   -v VER [--server -t TYPE] [--yes]
 orzmc update   [-v VER] [--check] [--channel release|beta] [--file PATH] [--yes] [--force]
-orzmc self-uninstall [--yes] [--remove-root] [--force]
+orzmc uninstall [--yes] [--remove-root] [--force]
 orzmc list
 orzmc backup   [-v VER] [-t TYPE]
 orzmc plugin   [-s 关键词] [-l] [-o 目录] [-v 游戏版本] [-c 数量]   # Hangar 搜索 / 下载服务端插件
