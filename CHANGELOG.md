@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.12.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.11.0...v2.12.0) (2026-10-17)
+
+
+### Features
+
+* **install:** install.conf 写入 surface（cli|gui，标明哪个前端装了 CLI） ([#69](https://github.com/OrzMC/OrzPythonMC/issues/69)) ([3974436](https://github.com/OrzMC/OrzPythonMC/commit/3974436e5a505e97d2e76228b25c8225447d5733))
+
+
+### Bug Fixes
+
+* **cli:** 修复冻结二进制补全崩溃并补齐 CLI 自动化验收 ([#71](https://github.com/OrzMC/OrzPythonMC/issues/71)) ([65f24a5](https://github.com/OrzMC/OrzPythonMC/commit/65f24a5b17a7a98b866c112aa1c30201caabd33c))
+
 ## [2.11.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.10.0...v2.11.0) (2026-10-17)
 
 
