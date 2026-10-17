@@ -5,8 +5,8 @@
 #   curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh
 # 指定版本(绕过 GitHub API 限流):
 #   curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh -s -- --version vX.Y.Z
-# 其它选项:--dir <path> / --no-modify-rc / --file <path>(本地安装,测试接缝)/ --uninstall。
-# 环境变量:ORZMC_SURFACE=cli|gui(写入 install.conf,标明哪个前端装了 CLI,缺省 cli)。
+# 其它选项:--dir <path> / --no-modify-rc / --no-completion / --file <path>(本地安装,测试接缝)/ --uninstall。
+# 环境变量:ORZMC_SURFACE=cli|gui(写入 install.conf);ORZMC_NO_COMPLETION=1 不装补全。
 #
 # 约束:macOS /bin/sh 是 bash 3.2 的 POSIX 模式,Linux /bin/sh 是 dash——
 #   无数组、无 [[ ]]、无 &>、无 sed -i、无 jq;JSON 解析用 grep/sed。
@@ -21,6 +21,7 @@ PAGES_URL="https://orzmc.github.io/OrzPythonMC/install.sh"
 VERSION=""
 DIR=""
 NO_RC=""
+NO_COMPLETION=""
 FILE=""
 MODE="install"
 URL=""
@@ -31,6 +32,7 @@ BINARY=""
 RC_FILE=""
 PATH_FILE=""
 PATH_LINE=""
+COMPLETION_FILE=""
 STATE_DIR=""
 MANIFEST=""
 ROOT_DIR=""
@@ -52,7 +54,8 @@ OrzMC 一键安装器(macOS / Linux)
 选项:
   --version vX.Y.Z   安装指定版本(绕过 GitHub API 限流)
   --dir <path>       自定义安装目录(默认 ${XDG_BIN_HOME:-$HOME/.local/bin})
-  --no-modify-rc     不修改 shell 配置文件(仅打印手动 export 提示)
+  --no-modify-rc     不修改 shell 配置文件(仅打印手动 export 提示;也不再自动装补全)
+  --no-completion    不自动安装 Shell 补全(等价 ORZMC_NO_COMPLETION=1)
   --file <path>      从本地文件安装(测试 / 开发用)
   --uninstall        反向卸载:读 manifest 删二进制 + 还原 PATH(不删游戏数据;
                      常规卸载请用内置的 orzmc uninstall)
@@ -75,6 +78,7 @@ while [ "$#" -gt 0 ]; do
             ;;
         --uninstall) MODE="uninstall" ;;
         --no-modify-rc) NO_RC=1 ;;
+        --no-completion) NO_COMPLETION=1 ;;
         --version)
             [ "$#" -ge 2 ] || die "--version 需要一个参数(如 --version vX.Y.Z)"
             VERSION="$2"
@@ -242,6 +246,34 @@ register_path() {
     PATH_FILE="$RC_FILE"
 }
 
+# ── Shell 补全(规范 install-update.md §5 / frontends.md F6)──────────────────
+# 装完就调用一次 `orzmc completion install`:落点与幂等由命令自己负责(两套实现一致),
+# 这里只负责“要不要装”和把落点记进 manifest 供卸载清理。
+install_completion() {
+    COMPLETION_FILE=""
+    # 显式关闭,或用户要求不动 shell 配置(completion install 可能补一行 rc)。
+    if [ -n "$NO_COMPLETION" ] || [ -n "${ORZMC_NO_COMPLETION:-}" ]; then
+        return
+    fi
+    if [ -n "$NO_RC" ] || [ -n "${ORZMC_NO_RC:-}" ]; then
+        return
+    fi
+    case "$(basename "${SHELL:-}")" in
+        zsh) COMPLETION_FILE="$HOME/.zsh/completions/_orzmc" ;;
+        bash) COMPLETION_FILE="$HOME/.local/share/bash-completion/completions/orzmc" ;;
+        fish) COMPLETION_FILE="$HOME/.config/fish/completions/orzmc.fish" ;;
+        *) return ;;
+    esac
+    # 老版本二进制没有 completion 子命令 / 补全不支持当前 shell → 静默跳过,不影响安装。
+    if ! "$BINARY" completion install >/dev/null 2>&1; then
+        COMPLETION_FILE=""
+        return
+    fi
+    if [ ! -f "$COMPLETION_FILE" ]; then
+        COMPLETION_FILE=""
+    fi
+}
+
 # ── manifest 写入 ────────────────────────────────────────────────────────────
 write_manifest() {
     STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/orzmc"
@@ -267,6 +299,9 @@ write_manifest() {
         printf 'path_line=%s\n' "$PATH_LINE" >> "$MANIFEST"
     fi
     printf 'root_dir=%s\n' "$ROOT_DIR" >> "$MANIFEST"
+    if [ -n "$COMPLETION_FILE" ]; then
+        printf 'completion_file=%s\n' "$COMPLETION_FILE" >> "$MANIFEST"
+    fi
     # 哪个前端装了 CLI(docs/spec/install-update.md §3.1):GUI 触发时传 ORZMC_SURFACE=gui
     case "${ORZMC_SURFACE:-cli}" in
         cli | gui) printf 'surface=%s\n' "${ORZMC_SURFACE:-cli}" >> "$MANIFEST" ;;
@@ -289,6 +324,7 @@ do_install() {
     download
     install_binary
     register_path
+    install_completion
     write_manifest
 
     echo "[OK] orzmc 已安装到 $BINARY"
@@ -300,6 +336,11 @@ do_install() {
     else
         echo "未修改 shell 配置;若当前 PATH 不含 $INSTALL_DIR,请手动执行:"
         echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
+    fi
+    if [ -n "$COMPLETION_FILE" ]; then
+        echo "已安装 Shell 补全: $COMPLETION_FILE"
+    elif [ -z "$NO_COMPLETION" ] && [ -z "${ORZMC_NO_COMPLETION:-}" ] && [ -z "$NO_RC" ] && [ -z "${ORZMC_NO_RC:-}" ]; then
+        echo "Shell 补全未安装(可稍后手动执行: orzmc completion install)"
     fi
     echo "升级:orzmc update(或重新执行本命令覆盖安装)。"
     echo "卸载: orzmc uninstall --yes(游戏数据默认保留;--remove-root 连 ~/minecraft 一起删)"
@@ -317,6 +358,7 @@ do_uninstall() {
     INSTALL_DIR="$(sed -n 's/^install_dir=//p' "$MANIFEST" | head -n1)"
     PATH_FILE="$(sed -n 's/^path_file=//p' "$MANIFEST" | head -n1)"
     PATH_LINE="$(sed -n 's/^path_line=//p' "$MANIFEST" | head -n1)"
+    COMPLETION_FILE="$(sed -n 's/^completion_file=//p' "$MANIFEST" | head -n1)"
     if [ -n "$BIN" ] && [ -f "$BIN" ]; then
         rm -f "$BIN"
         echo "已删除二进制: $BIN"
@@ -331,6 +373,11 @@ do_uninstall() {
         else
             echo "未在 $PATH_FILE 中找到记录的 PATH 行,跳过还原"
         fi
+    fi
+    if [ -n "$COMPLETION_FILE" ] && [ -f "$COMPLETION_FILE" ]; then
+        rm -f "$COMPLETION_FILE"
+        rmdir "$(dirname "$COMPLETION_FILE")" 2>/dev/null || true
+        echo "已删除补全脚本: $COMPLETION_FILE"
     fi
     rm -f "$MANIFEST"
     rmdir "$STATE_DIR" 2>/dev/null || true

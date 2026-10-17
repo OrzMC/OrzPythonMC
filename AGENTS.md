@@ -96,6 +96,12 @@ python/                         # uv workspace 根
 
 **最新版解析的限流兜底**:两个安装器与库都首选 GitHub REST API(`api.github.com/.../releases/latest`,60 次/时/**IP**),失败或限流时退回 `https://github.com/<repo>/releases/latest` 的 **302 `Location`**(非 API 端点,不限流),再自行拼资产地址。CI runner 与共享 NAT 用户必然吃限流,这条兜底是产品可用性路径而非可选优化。`install.sh` 用 `curl -sS -o /dev/null -w '%{redirect_url}'`(**不能带 `-L`**:跟随完重定向后 `%{redirect_url}` 是空串);`install.ps1` 用 `[System.Net.WebRequest]::Create(...).AllowAutoRedirect = $false` 读 `Location`;库侧 `HttpClient.head_location()` + `selfupdate._tag_from_redirect()`。两个安装器另有 `ORZMC_API_LATEST` 接缝(测试/镜像):指向不可用地址即可验证兜底,`scripts/accept_selfupdate.py` 有对应 case。
 
+**Shell 补全(规范 `install-update.md` §5)**:两个安装器装完都会调用一次 `orzmc completion install`(落点/幂等由命令实现,
+安装器只负责“要不要装”+把落点写进 `install.conf` 的 `completion_file` 供卸载清理);`--no-completion` /
+`ORZMC_NO_COMPLETION=1` 关闭,**`--no-modify-rc` / `ORZMC_NO_RC=1` 也一并跳过**(该开关承诺不碰 shell 配置,
+而补全可能补一行 rc)。Windows 侧按 `frontends.md` F6 不落盘(powershell/pwsh 只生成脚本),故 `install.ps1`
+不写 `completion_file`。旧版二进制没有 `completion` 子命令时静默跳过,不影响安装。
+
 **`docs/install.sh`(严格 POSIX sh)**:`set -eu`;无数组 / 无 `[[ ]]` / 无 `&>` / 无 `sed -i` / 无 jq,环境变量一律 `${VAR:-default}`。下载产物 magic 校验(`od -An -tx1 -N4`:Mach-O `cffaedfe` / ELF `7f454c46`;HTML/JSON 拒绝)。PATH 登记用 `$SHELL` 选 `.zshrc`/`.bashrc`/`.profile`,运行期 `case ":$PATH:"` 判已在 + `grep -Fqx` 判行重复,卸载用 `grep -Fvx` 删精确行(仅当行存在才写回)。选项:`--version vX.Y.Z`(固定版本,绕过 GitHub API 限流)/ `--dir` / `--no-modify-rc`(或 `ORZMC_NO_RC=1`)/ `--file`(本地安装,测试接缝)/ `--uninstall`(shell 兜底)。
 
 **`docs/install.ps1`(PowerShell 5.1+)**:

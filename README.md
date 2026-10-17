@@ -31,7 +31,7 @@ Windows(PowerShell 5.1+):
 irm https://orzmc.github.io/OrzPythonMC/install.ps1 | iex
 ```
 
-安装器自动识别平台、下载最新二进制、登记 PATH 并写入安装记录;重复执行即覆盖升级。更多选项见 `install.sh --help`(`--version vX.Y.Z` 固定版本、`--dir` 自定义目录等)。已装好后也可用内置的 `orzmc update` 自升级(见下文)。
+安装器自动识别平台、下载最新二进制、登记 PATH、**装 Shell 补全**并写入安装记录;重复执行即覆盖升级。更多选项见 `install.sh --help`(`--version vX.Y.Z` 固定版本、`--dir` 自定义目录、`--no-completion` 不装补全、`--no-modify-rc` 不动 shell 配置等)。已装好后也可用内置的 `orzmc update` 自升级(见下文)。
 
 **方式二:其它方式**
 
