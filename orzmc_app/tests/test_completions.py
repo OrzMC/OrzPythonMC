@@ -86,13 +86,13 @@ class TestInstall:
         # 只能靠 source,所以必须幂等地补一行 rc。
         install("bash", "# script\n", home=tmp_path)
         install("bash", "# script\n", home=tmp_path)
-        rc = (tmp_path / ".bashrc").read_text()
+        rc = (tmp_path / ".bashrc").read_text(encoding="utf-8")
         assert rc.count("added by orzmc") == 1
 
     def test_zsh_adds_fpath_once(self, tmp_path: Path) -> None:
         install("zsh", "# script\n", home=tmp_path)
         install("zsh", "# script\n", home=tmp_path)
-        rc = (tmp_path / ".zshrc").read_text()
+        rc = (tmp_path / ".zshrc").read_text(encoding="utf-8")
         assert rc.count("fpath+=(~/.zsh/completions)") == 1
 
     def test_zsh_leaves_existing_fpath_untouched(self, tmp_path: Path) -> None:
@@ -100,13 +100,13 @@ class TestInstall:
         rc.write_text("fpath+=(~/.zsh/completions)\n", encoding="utf-8")
         result = install("zsh", "# script\n", home=tmp_path)
         assert result.hint == ""
-        assert rc.read_text() == "fpath+=(~/.zsh/completions)\n"
+        assert rc.read_text(encoding="utf-8") == "fpath+=(~/.zsh/completions)\n"
 
     def test_zsh_appends_after_missing_trailing_newline(self, tmp_path: Path) -> None:
         rc = tmp_path / ".zshrc"
         rc.write_text("export EDITOR=vim", encoding="utf-8")
         install("zsh", "# script\n", home=tmp_path)
-        lines = rc.read_text().splitlines()
+        lines = rc.read_text(encoding="utf-8").splitlines()
         assert lines[0] == "export EDITOR=vim"
         assert any("added by orzmc" in line for line in lines)
 

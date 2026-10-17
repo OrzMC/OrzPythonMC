@@ -740,7 +740,7 @@ def test_completion_install_uses_env_shell(monkeypatch, tmp_path) -> None:
     assert (home / ".zsh/completions/_orzmc").is_file()
     # 幂等:再装一次不重复改 rc
     assert runner.invoke(app, ["completion", "install"]).exit_code == 0
-    assert (home / ".zshrc").read_text().count("fpath+=(~/.zsh/completions)") == 1
+    assert (home / ".zshrc").read_text(encoding="utf-8").count("fpath+=(~/.zsh/completions)") == 1
 
 
 def test_completion_install_without_shell_is_usage_error(monkeypatch, tmp_path) -> None:
