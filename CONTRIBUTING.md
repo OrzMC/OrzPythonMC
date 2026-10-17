@@ -80,6 +80,11 @@ gh workflow run release.yml --ref main -f tag=vX.Y.Z
 
 release-please 只把 Conventional Commits 渲染成「Features / Bug Fixes」清单,**它不会告诉用户「该怎么办」**。所以当一次发版包含**需要用户手动处理**的内容时,必须在 release PR 里**手工**给该版本条目顶部加一段 `### ⚠️ 升级须知`,并在合并后同步到 GitHub Release notes,否则用户只看得到「修了什么」,不知道「怎么升级/迁移」。
 
+> **别踩这个坑(2026-10 实测)**:release-please 会 **force-push** 自己的 release 分支。在 release PR 里手工加的 CHANGELOG 段落,可能在它下一次更新时被覆盖;而 Release notes 是**创建 release 时**的快照,不跟随 CHANGELOG 变化。所以:
+> 1. 「升级须知」在 **合并前最后一刻** 加(加完立刻合并);
+> 2. 合并后**务必**复查 `gh release view <tag>` —— 若 notes 里没有,用
+>    `gh release edit <tag> --notes-file <(升级须知 + 原 body)>` 补上,再对一遍仓库里的 `CHANGELOG.md`。
+
 触发条件(满足任一即必须写):
 
 - **修好了自升级 / 安装器自身的 bug** —— 旧版本无法自动升级到该版本,必须给出**绝对路径**等手动「过河」方式(2.9.1 就是这种情况);
