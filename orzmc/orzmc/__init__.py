@@ -41,7 +41,7 @@ from orzmc.services.selfinstall import (
 )
 from orzmc.services.selfupdate import SelfUpdater, UpdateCheck
 from orzmc.services.server import ServerService
-from orzmc.services.versions import InstalledVersion, VersionManager
+from orzmc.services.versions import InstalledVersion, VersionManager, VersionNotFoundError
 from orzmc.version import __version__
 
 __all__ = [
@@ -83,6 +83,7 @@ __all__ = [
     "UpdateCheck",
     "VersionEntry",
     "VersionManager",
+    "VersionNotFoundError",
     # versions
     "__version__",
     "authenticate",

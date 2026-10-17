@@ -27,6 +27,7 @@ from orzmc import (
     GameType,
     PluginService,
     RuntimeOptions,
+    VersionNotFoundError,
     authenticate,
     backup_world,
     check_self_update,
@@ -198,7 +199,12 @@ def root(
             _console.print(disclaimer_text(), style="dim", soft_wrap=True)
         raise typer.Exit(0)
     ctx.obj = {"verbose": verbose, "root_dir": root_dir, "json": json_output}
+    _begin("_root", ctx)
     if ctx.invoked_subcommand is None:
+        if _json_mode():
+            # `--json` 承诺 stdout 只有信封,帮助是给人看的 —— 与 Swift 一致:
+            # 缺子命令按用法错误处理(§1 的「打印帮助并退 0」只在人类可读模式下成立)。
+            _fail("缺少子命令(用 orzmc --help 查看全部命令)", code="E_USAGE")
         _console.print(ctx.get_help(), markup=False)
         raise typer.Exit(0)
 
@@ -404,6 +410,8 @@ def remove(
                 else (lambda desc: False)
             ),
         )
+    except VersionNotFoundError as exc:
+        _fail(str(exc), code="E_NOT_FOUND")
     except Exception as exc:
         _fail(str(exc), code="E_RUNTIME")
     if not removed:

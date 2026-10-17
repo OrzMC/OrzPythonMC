@@ -279,7 +279,7 @@
           <code class="cmd-line"><button class="copy" data-copy="orzmc uninstall --yes">复制</button>orzmc uninstall --yes</code>
         </div>
       </div>
-      <p class="panel-note">安装自动识别平台、登记 PATH;卸载删除二进制、还原 PATH,游戏数据默认保留(<code>--remove-root</code> 一并删除)。<code>--version vX.Y.Z</code> 可固定安装版本。</p>
+      <p class="panel-note">安装自动识别平台、登记 PATH;卸载删除二进制、还原 PATH 与补全,游戏数据默认保留(<code>--remove-root</code> 一并删除)。脚本里调用卸载需带 <code>--yes</code>(否则按规范取消并退出 130)。<code>--version vX.Y.Z</code> 可固定安装版本。</p>
 
       <h3 class="sub-head">独立二进制</h3>
       <div class="dl-table" id="dl-list" aria-live="polite">
@@ -304,7 +304,7 @@
       <div class="qs-code"><pre><span class="cm"># 安装(Unix 一条命令;Windows 用 irm https://orzmc.github.io/OrzPythonMC/install.ps1 | iex)</span>
 curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh
 
-<span class="cm"># 每个子命令支持 --help 查看参数(如 orzmc client --help 可看到 -u/--username 等)</span>
+<span class="cm"># 每个子命令支持 --help(或 -h)查看参数(如 orzmc client --help 可看到 -u/--username 等)</span>
 orzmc client --help
 
 <span class="cm"># 启动最新版(26.2)原版客户端;-v 缺省时自动用 Mojang 最新 release</span>
@@ -329,6 +329,12 @@ orzmc client -v 26.2 --refresh
 
 <span class="cm"># 下载并发(小文件多、延迟高 / 走代理时调大明显更快,1-64,默认 16)</span>
 orzmc client -v 26.2 -j 32
+
+<span class="cm"># Shell 补全:按 $SHELL 装到标准目录(幂等;bash/zsh/fish;卸载时一并清理)</span>
+orzmc completion install
+
+<span class="cm"># 也可以只打印脚本,自己放进 rc(如 zsh)</span>
+orzmc completion zsh &gt; ~/.zsh/completions/_orzmc
 
 <span class="cm"># 升级 orzmc 自身(GitHub 最新发布;--check 只查询,-v 指定版本)</span>
 orzmc update --check
@@ -379,6 +385,11 @@ orzmc update</pre></div>
           <div class="icon">🚀</div>
           <h3>即装即用</h3>
           <p>检测到文件缺失自动下载补齐,无需独立 install 子命令;CLI 与库双层架构,可编程复用。</p>
+        </div>
+        <div class="feat">
+          <div class="icon">🧩</div>
+          <h3>Shell 补全</h3>
+          <p><code>orzmc completion install</code> 按 <code>$SHELL</code> 写到标准补全目录(bash / zsh / fish),同名路径幂等覆盖、需要时才补一行 rc;powershell / pwsh 只生成脚本、不改执行策略。补全文件登记进安装记录,<code>orzmc uninstall</code> 会一并删除。</p>
         </div>
         <div class="feat">
           <div class="icon">💾</div>

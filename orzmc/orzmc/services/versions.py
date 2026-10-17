@@ -10,6 +10,14 @@ from orzmc.domain.paths import DEFAULT_ROOT
 from orzmc.infra.fs import FileStore
 
 
+class VersionNotFoundError(RuntimeError):
+    """目标版本(或其客户端/某类型服务端)不存在。
+
+    单独一个类型是为了让 CLI 报规范里的 ``E_NOT_FOUND``(§6 错误码表),而不是笼统的
+    ``E_RUNTIME`` —— Swift 实现同样报 ``E_NOT_FOUND``。
+    """
+
+
 @dataclass(frozen=True)
 class InstalledVersion:
     version: str
@@ -66,7 +74,7 @@ class VersionManager:
                 raise ValueError("移除服务端必须指定类型 (-t)")
             target = os.path.join(self._root, "versions", version, "server", game_type)
         if not self._fs.exists(target):
-            raise RuntimeError(f"未找到要移除的目录: {target}")
+            raise VersionNotFoundError(f"未找到要移除的目录: {target}")
         if not yes and confirm is not None and not confirm(f"移除 {target}?"):
             return False
         self._fs.remove(target)

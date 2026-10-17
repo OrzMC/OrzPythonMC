@@ -401,10 +401,13 @@ def test_remove_server_requires_type() -> None:
     assert "需要指定类型" in result.stderr
 
 
-def test_remove_missing_version_raises(tmp_path) -> None:
-    result = runner.invoke(app, ["remove", "-v", "9.9.9", "--yes", "--root-dir", str(tmp_path)])
+def test_remove_missing_version_is_not_found(tmp_path) -> None:
+    """规范 §6 错误码表:`目标不存在` 用 E_NOT_FOUND(与 Swift 一致),不是笼统 E_RUNTIME。"""
+    result = runner.invoke(app, ["--json", "remove", "-v", "9.9.9", "--yes", "--root-dir", str(tmp_path)])
     assert result.exit_code == 1
-    assert "未找到" in result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "E_NOT_FOUND"
+    assert "未找到" in payload["error"]["message"]
 
 
 def test_bad_memory_rejected() -> None:
@@ -646,6 +649,22 @@ def test_typer_completion_options_are_not_exposed() -> None:
         env={"_ORZMC_COMPLETE": "complete_bash", "COMP_WORDS": "orzmc cl", "COMP_CWORD": "1"},
     )
     assert "client" in result.stdout
+
+
+def test_no_subcommand_json_is_usage_error() -> None:
+    """`--json` 下 stdout 只能有信封:缺子命令不能打帮助(§1/§6.1)。"""
+    result = runner.invoke(app, ["--json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["command"] == "_root"
+    assert payload["error"]["code"] == "E_USAGE"
+
+
+def test_no_subcommand_prints_help() -> None:
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0
+    assert "Usage" in result.stdout
 
 
 def test_usage_error_exit_code_is_one(monkeypatch) -> None:

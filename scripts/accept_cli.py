@@ -291,6 +291,12 @@ def case_no_args(ctx: Context) -> None:
         check(name in result.stdout, f"帮助里缺命令 {name}:\n" + result.describe())
 
 
+@case("surface", "no-subcommand-json-is-usage-error")
+def case_no_subcommand_json(ctx: Context) -> None:
+    """`--json` 承诺 stdout 只有信封:缺子命令按用法错误处理(§1/§6.1)。"""
+    expect_error(ctx.run("--json"), "_root", "E_USAGE")
+
+
 @case("surface", "help-flags")
 def case_help_flags(ctx: Context) -> None:
     for flag in ("-h", "--help"):
@@ -371,7 +377,8 @@ def case_envelope_matrix(ctx: Context) -> None:
 @case("envelope", "failures-do-not-print-human-lines-to-stdout")
 def case_envelope_stdout_only_json(ctx: Context) -> None:
     result = ctx.run("--json", "remove", "-v", "9.9.9", "--root-dir", str(ctx.sandbox.root))
-    expect_error(result, "remove")
+    # 规范 §6 错误码表:目标不存在 = E_NOT_FOUND(两套实现一致)。
+    expect_error(result, "remove", "E_NOT_FOUND")
     check(
         result.stdout.strip().count("\n") == 0,
         "stdout 只能有信封一行(人类可读内容必须走 stderr):\n" + result.describe(),

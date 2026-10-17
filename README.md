@@ -114,6 +114,10 @@ orzmc server -v 26.2 -t fabric --yes
 orzmc list
 orzmc remove -v 26.2 --yes
 
+# Shell 补全(bash/zsh/fish):按 $SHELL 落到标准补全目录,幂等;卸载时一并清理
+orzmc completion install
+orzmc completion zsh > ~/.zsh/completions/_orzmc   # 也可以只打印脚本自己装
+
 # 升级 orzmc 自身(GitHub 最新发布;--check 只查询,--version 指定版本)
 orzmc update --check
 orzmc update
@@ -121,10 +125,10 @@ orzmc update
 
 ## 命令行
 
-每个子命令都可加 `--help` 查看完整参数(如 `orzmc client --help`)。
+每个子命令都可加 `--help`(或 `-h`)查看完整参数(如 `orzmc client --help`)。
 
 ```
-orzmc [--verbose] [--json] [--root-dir DIR]   # 无子命令 → 打印帮助
+orzmc [--verbose] [--json] [--root-dir DIR]   # 无子命令 → 打印帮助(--json 时返回 E_USAGE 信封)
 orzmc client   [-v VER] [--username|-u USER] [-t vanilla|fabric|forge] [-m MIN] [-x MAX]
                [--auth] [--extract-music] [--jvm-opts ...] [--refresh] [-j THREADS] [--root-dir DIR]
 orzmc server   [-v VER] [-t vanilla|paper|fabric|forge] [-m MIN] [-x MAX]
@@ -140,7 +144,7 @@ orzmc plugin   [-s 关键词] [-l] [-o 目录] [-v 游戏版本] [-c 数量]   #
 orzmc app      install|open|uninstall|status                # macOS 应用
 orzmc version | capabilities | mcp
 orzmc completion bash|zsh|fish|powershell|pwsh      # 打印补全脚本到 stdout
-orzmc completion install                          # 按 $SHELL 装到标准补全目录(幂等;不改执行策略)
+orzmc completion install                          # 按 $SHELL 装到标准补全目录(幂等;不改执行策略;powershell 不支持自动安装)
 ```
 
 要点:
@@ -153,6 +157,7 @@ orzmc completion install                          # 按 $SHELL 装到标准补�
 - **大文件分块**:客户端 jar / 服务端 jar / JRE(≥8MB)自动分 4 路 `Range` 并行下载再拼接(实测 39MB 客户端 jar 单流 2.5 MB/s → 4 路 4.0 MB/s),服务器忽略 `Range`(部分代理/镜像)时自动回退单流,拼接后仍按 SHA-1 校验。
 - **元数据缓存**:版本清单、Fabric 元数据、Paper 构建、Forge promotions 统一缓存 **24 小时**,期间直接复用缓存(离线也能启动已装版本);加 `--refresh` 强制重新拉取。
 - **自升级**:`orzmc update` 升级工具自身二进制(`--check` 只查询,`-v/--version` 指定版本或绕过 GitHub API 限流,`--file` 离线/本地安装)。为保证正在运行的程序不被弄坏,替换由分离助手在命令退出后完成——**下一次运行才是新版本**;pip/pipx 托管安装会被拒绝并提示用 `pip install -U orzmc-app`。
+- **Shell 补全**:`orzmc completion install` 按 `$SHELL`(Windows 视为 powershell)把脚本装到标准目录并**幂等**覆盖——bash 落在 `~/.local/share/bash-completion/completions/orzmc`(必要时补一行 `source`)、zsh 落在 `~/.zsh/completions/_orzmc`(必要时补 `fpath`)、fish 落在 `~/.config/fish/completions/orzmc.fish`;`powershell`/`pwsh` 只生成脚本、不改执行策略、不自动落盘。落点会登记进安装记录,**`orzmc uninstall` 会一并删除**。
 - **服务端关闭**:终端输入 `stop` 保存退出,或按 **Ctrl-C**(等待保存退出,超 60s 才强制结束,不留孤儿进程)。
 - **类型**:客户端 `vanilla|fabric|forge`;服务端 `vanilla|paper|fabric|forge`。
 - **Java**:版本要求读自版本 JSON,自动下载 Temurin JRE 到 `java/<大版本>/`,无需完整 JDK。
@@ -201,11 +206,25 @@ uv build --all-packages       # 构建两个包
 uv run python scripts/accept_selfupdate.py
 uv run python scripts/accept_selfupdate.py --skip-build --powershell pwsh --expect-ps-major 7
 
+# CLI 行为验收(真实进程:帮助/信封/退出码/取消语义/补全/MCP;按规范断言)
+uv run python scripts/accept_cli.py
+uv run python scripts/accept_cli.py --cli dist/orzmc      # 同一套断言跑冻结二进制(发布前必跑)
+
 # 真实下载 Minecraft / Java 并启动
 uv run --package orzmc-app python scripts/acceptance.py \
     --case server:vanilla:latest --case client:vanilla:latest \
     --root /tmp/orzmc-accept
 ```
+
+## 行为变化(2.12 起)
+
+- `--install-completion` / `--show-completion` **已移除**(与 `completion` 子命令重复):改用
+  `orzmc completion install`(自动装)或 `orzmc completion <shell>`(只打印脚本)。
+- **非交互**(脚本 / 管道 / CI)下,`remove` / `uninstall` 必须显式 `--yes`,否则按规范返回取消并退出 **130**
+  (以前是「静默不删」或「静默删掉」两种实现各一套)。
+- 用法错误(未知命令 / 未知选项 / 缺必填)统一退出 **1**(框架默认的 2 已归一)。
+- 错误信息一律写 **stderr**;`--json` 下 stdout **只有**信封。
+- `--json` 且不带子命令 → `E_USAGE` 信封 + 退出 1(不再往 stdout 打帮助)。
 
 ## 兼容性说明(v1 → v2)
 
