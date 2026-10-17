@@ -446,7 +446,7 @@ class TestWindowsPathRestore:
 class TestRunningBinary:
     """``running_binary`` resolves the *installed* binary, never a CWD decoy.
 
-    Regression: ``orzmc update``/``self-uninstall`` used
+    Regression: ``orzmc update``/``uninstall`` used
     ``Path(sys.argv[0]).resolve()``. A bare ``orzmc`` (invoked through ``PATH``)
     is just the word ``orzmc``, so it resolved against the CWD — updating or
     creating ``./orzmc`` and leaving the installed binary (and the user) on the

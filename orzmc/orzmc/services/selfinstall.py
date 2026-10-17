@@ -1,6 +1,6 @@
-"""Install record + self-uninstall: remove the binary, restore PATH, drop game data.
+"""Install record + uninstall: remove the binary, restore PATH, drop game data.
 
-Backs the ``orzmc self-uninstall`` CLI command. Follows the ``VersionManager`` /
+Backs the ``orzmc uninstall`` CLI command. Follows the ``VersionManager`` /
 ``Backup`` injection pattern: pure filesystem + reporter, no network, no
 system-level process management.
 
@@ -30,7 +30,7 @@ SCHEMA = 1
 def looks_like_dev(binary: str) -> bool:
     """True when the binary sits in a venv / site-packages / PyInstaller temp dir.
 
-    Guards both self-uninstall and self-update: replacing or deleting a
+    Guards both uninstall and self-update: replacing or deleting a
     developer/pip-managed artifact would break the tool that owns it.
     """
     parts = os.path.abspath(binary).replace(os.sep, "/").split("/")

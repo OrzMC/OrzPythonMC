@@ -19,7 +19,7 @@ from orzmc_app import __version__ as APP_VERSION
 from orzmc_app.cli.introspect import command_specs
 
 # 不暴露给 AI 的元 / 自毁命令(§8.2):无操作价值或可能破坏工具自身。
-EXCLUDED_TOOLS = frozenset({"capabilities", "completion", "mcp", "self-uninstall"})
+EXCLUDED_TOOLS = frozenset({"capabilities", "completion", "mcp", "uninstall"})
 
 # 缺省 MCP 协议版本;客户端在 initialize 里报了版本就回显它。
 DEFAULT_PROTOCOL_VERSION = "2025-06-18"

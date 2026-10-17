@@ -45,7 +45,7 @@ def test_help_lists_all_commands() -> None:
         "list",
         "backup",
         "version",
-        "self-uninstall",
+        "uninstall",
         "completion",
         "capabilities",
         "plugin",
@@ -423,7 +423,7 @@ class TestDownloadThreadsOption:
         assert {"--download-threads", "-j"} <= opts
 
 
-def test_self_uninstall_calls_public_api(monkeypatch) -> None:
+def test_uninstall_calls_public_api(monkeypatch) -> None:
     calls: list[tuple] = []
 
     def fake_uninstall(binary, **kwargs) -> bool:
@@ -431,7 +431,7 @@ def test_self_uninstall_calls_public_api(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(app_module, "uninstall_self", fake_uninstall)
-    result = runner.invoke(app, ["self-uninstall", "--yes", "--force", "--root-dir", "/tmp/mc-root"])
+    result = runner.invoke(app, ["uninstall", "--yes", "--force", "--root-dir", "/tmp/mc-root"])
     assert result.exit_code == 0, result.stdout
     assert calls
     binary, kwargs = calls[0]
@@ -442,7 +442,7 @@ def test_self_uninstall_calls_public_api(monkeypatch) -> None:
     assert kwargs["remove_root"] is False
 
 
-def test_self_uninstall_removes_root_when_flagged(monkeypatch) -> None:
+def test_uninstall_removes_root_when_flagged(monkeypatch) -> None:
     calls: list[dict] = []
 
     def fake_uninstall(binary, **kwargs) -> bool:
@@ -450,17 +450,17 @@ def test_self_uninstall_removes_root_when_flagged(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(app_module, "uninstall_self", fake_uninstall)
-    result = runner.invoke(app, ["self-uninstall", "--remove-root"])
+    result = runner.invoke(app, ["uninstall", "--remove-root"])
     assert result.exit_code == 0, result.stdout
     assert calls[0]["remove_root"] is True
 
 
-def test_self_uninstall_error_fails(monkeypatch) -> None:
+def test_uninstall_error_fails(monkeypatch) -> None:
     def fake_uninstall(binary, **kwargs) -> bool:
         raise RuntimeError("检测到疑似开发环境安装")
 
     monkeypatch.setattr(app_module, "uninstall_self", fake_uninstall)
-    result = runner.invoke(app, ["self-uninstall"])
+    result = runner.invoke(app, ["uninstall"])
     assert result.exit_code == 1
     assert "检测到疑似开发环境安装" in result.stdout
 

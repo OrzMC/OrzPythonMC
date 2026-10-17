@@ -50,7 +50,7 @@ irm https://orzmc.github.io/OrzPythonMC/install.ps1 | iex
         │ 平台差异全部收敛在这一层(sh / PowerShell)
         ▼
 ┌─ 二进制内置卸载(平台无关,一份代码)────────────┐
-│  orzmc self-uninstall                            │
+│  orzmc uninstall                            │
 │  读 manifest → 还原 PATH → 删自身 → 可选删游戏数据 │
 └──────────────────────────────────────────────┘
 ```
@@ -113,7 +113,7 @@ irm https://orzmc.github.io/OrzPythonMC/install.ps1 | iex
 | `--version vX.Y.Z` | 固定版本安装(绕过 API 限流) |
 | `--dir <path>` | 自定义安装目录 |
 | `--no-modify-rc` | 不写 shell rc(仅打印提示) |
-| `--uninstall` | 反向操作:读 manifest 删二进制 + 还原 rc + 删 manifest(**不删游戏数据**,仅兜底,常规卸载走 `orzmc self-uninstall`) |
+| `--uninstall` | 反向操作:读 manifest 删二进制 + 还原 rc + 删 manifest(**不删游戏数据**,仅兜底,常规卸载走 `orzmc uninstall`) |
 
 幂等与升级:重复执行 = 覆盖二进制 + 更新 manifest 版本号,即「一条命令升级」。
 
@@ -144,12 +144,12 @@ root_dir=/Users/joker/minecraft
 ```
 
 - 路径:Unix 在 `${XDG_STATE_HOME:-$HOME/.local/state}/orzmc/install.conf`,Windows 在 `%LOCALAPPDATA%\orzmc\install.conf`。
-- `self-uninstall` 查找顺序:① state 目录 ② 二进制旁 `.orzmc-manifest`(兼容二进制被移动的情形)。
+- `uninstall` 查找顺序:① state 目录 ② 二进制旁 `.orzmc-manifest`(兼容二进制被移动的情形)。
 - `root_dir` 记录安装时默认游戏根 `~/minecraft`(与库内 `DEFAULT_ROOT` 一致),供卸载询问「是否连游戏数据一起删」。
 
-### 4.4 `orzmc self-uninstall` 子命令
+### 4.4 `orzmc uninstall` 子命令
 
-**与 `orzmc remove` 明确区分**:`remove` 删 Minecraft 版本(数据),`self-uninstall` 删工具本身(二进制 + PATH 修改 + 可选数据)。命名用 `self-uninstall`,避免与 `remove` 歧义。
+**与 `orzmc remove` 明确区分**:`remove` 删 Minecraft 版本(数据),`uninstall` 删工具本身(二进制 + PATH 修改 + 可选数据)。命名用 `uninstall`,避免与 `remove` 歧义。
 
 **选项**:`--yes`(免确认,脚本化调用)、`--remove-root`(连游戏数据根 `~/minecraft` 一起删)、`--root-dir`(覆盖默认)、`--force`(绕过安全护栏)。
 
@@ -170,7 +170,7 @@ root_dir=/Users/joker/minecraft
 |---|---|
 | `orzmc/` 库 | 新增 `orzmc/services/selfinstall.py`:`InstallManifest`(读写/查找)+ `uninstall_self(binary, *, root_dir, remove_root, yes, force, reporter)`;纯 fs 注入、无网络,可单测 |
 | 公共 API | `orzmc/__init__.py` 导出 `uninstall_self`(公共 API 即契约) |
-| `orzmc-app` | `app.py` 新增 `self-uninstall` 子命令,只调公共 API,复用 `options.py` 的 `Yes` / `RootDir` 模式 |
+| `orzmc-app` | `app.py` 新增 `uninstall` 子命令,只调公共 API,复用 `options.py` 的 `Yes` / `RootDir` 模式 |
 
 ## 5. 与现有发布链路集成
 
@@ -178,7 +178,7 @@ root_dir=/Users/joker/minecraft
 |---|---|
 | `release.yml` | **零改动**——二进制命名已是 `orzmc-<os>-<arch>`(`orzmc-macos-arm64` 等 6 组合),安装器按此命名匹配即可 |
 | `pages.yml` | 把 `install.sh` / `install.ps1` 提交到 `docs/`(触发现有 Pages 自动部署),URL 即 `https://orzmc.github.io/OrzPythonMC/install.sh`。`.sh` 的 MIME 不影响 `curl -fsSL \| sh` |
-| 官网 `docs/index.html` | **同时更新安装区与卸载区**。安装区主推单行命令(Unix / Windows 两条),二进制下载降为次级,`pip`/`uv` 移入「其它方式」;卸载区与安装一一对应——统一卸载 `orzmc self-uninstall` 为主,`pip uninstall` / 删二进制为备,并说明游戏数据默认保留、如何清理(主页已先落地当前方式:PyPI 卸载 + 删二进制 + `~/minecraft` 手动清理) |
+| 官网 `docs/index.html` | **同时更新安装区与卸载区**。安装区主推单行命令(Unix / Windows 两条),二进制下载降为次级,`pip`/`uv` 移入「其它方式」;卸载区与安装一一对应——统一卸载 `orzmc uninstall` 为主,`pip uninstall` / 删二进制为备,并说明游戏数据默认保留、如何清理(主页已先落地当前方式:PyPI 卸载 + 删二进制 + `~/minecraft` 手动清理) |
 | `README.md` | 同步:安装节改为单行命令,补充卸载节 |
 
 ## 6. 备选方案对比
@@ -188,7 +188,7 @@ root_dir=/Users/joker/minecraft
 | 现状:pip | 1 | Python 3.10+ | ✗ 不生效 | ✗ | 低 |
 | 现状:二进制 | 下载+解压 | 无 | ✓ | ✗ 手工 | 低 |
 | `uv tool install` | 2(需先装 uv) | uv | ✓ | `uv tool uninstall` | 低 |
-| **本方案 curl\|sh + self-uninstall** | **1** | sh+curl | **✓** | **内置一条命令** | 中 |
+| **本方案 curl\|sh + uninstall** | **1** | sh+curl | **✓** | **内置一条命令** | 中 |
 
 `uv tool` 是最低成本的备选(官方自己就解决了 PEP 668),但要求用户已有 uv,不是「一条命令」,且卸载依赖 uv 而非工具自带。本方案为推荐项;`uv tool install orzmc-app` 保留为官网「其它方式」之一。
 
@@ -198,8 +198,8 @@ root_dir=/Users/joker/minecraft
 1. `docs/install.sh`(含 `--uninstall`)。
 2. 库:`InstallManifest` + `uninstall_self` + 测试(`orzmc/tests/`,fake fs,无网络)。
 3. 公共 API 导出 `uninstall_self`。
-4. 应用:`self-uninstall` 子命令。
-5. `ci.yml` 新增 `installer` job(6 平台):`sh docs/install.sh` → `orzmc version` 断言版本 → `orzmc self-uninstall --yes` → 断言二进制已删除、rc 行已还原。
+4. 应用:`uninstall` 子命令。
+5. `ci.yml` 新增 `installer` job(6 平台):`sh docs/install.sh` → `orzmc version` 断言版本 → `orzmc uninstall --yes` → 断言二进制已删除、rc 行已还原。
 6. 官网 / README 更新。
 
 **阶段二(Windows):** `docs/install.ps1` + Windows 卸载细节(运行中 exe 删除:PyInstaller onefile 的主 exe 通常可删;若被锁,记录待重启删除计划),并把 CI `installer` job 扩展到 Windows。
@@ -209,7 +209,7 @@ root_dir=/Users/joker/minecraft
 **验收标准(每平台):**
 - 全新环境 `curl -fsSL .../install.sh | sh` 一条命令装好,`orzmc version` 可用。
 - 重复执行 = 升级,不产生重复 rc 行。
-- `orzmc self-uninstall --yes` 后:二进制消失、rc 改动还原、游戏数据保留并提示。
+- `orzmc uninstall --yes` 后:二进制消失、rc 改动还原、游戏数据保留并提示。
 - `--remove-root` 后:游戏数据一并清除。
 
 ## 8. 风险与注意点
