@@ -91,6 +91,8 @@ def _input_schema(options: list[dict[str, object]]) -> dict[str, object]:
             prop["description"] = option["help"]
         if option.get("default") is not None and not option["flag"]:
             prop["default"] = option["default"]
+        if option.get("enum"):
+            prop["enum"] = option["enum"]
         properties[name] = prop
         if option.get("required"):
             required.append(name)
