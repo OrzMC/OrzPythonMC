@@ -4,15 +4,16 @@
 
 1. 它要靠 ``shellingham`` 探测当前 shell;而 shellingham 在 ``__init__.py`` 里用
    ``importlib.import_module(f".{os.name}")`` **动态**导入平台实现,PyInstaller
-   的静态分析看不到 → 发布的单文件二进制里 ``shellingham.posix`` / ``shellingham.nt``
+   的静态分析看不到 → 发布的单文件二进制里 ``shellingham.posix`` / ``shellington.nt``
    缺失 → 任何探测路径都直接 ``RuntimeError: Shell detection not implemented for 'posix'``
    (2.11.0 及更早的真实发布版踩过,``--show-completion`` / ``completion install`` 全崩)。
 2. 它会**重写** ``~/.bashrc`` / ``~/.zshrc``,Windows 上还会执行
    ``Set-ExecutionPolicy Unrestricted -Scope CurrentUser`` —— 一个补全安装没有理由
    改用户的执行策略。
 
-这里只用标准库:shell 由 ``-`` / 环境变量显式决定,**幂等覆盖**固定落点,
-唯一会写的 rc 是 zsh 的 ``~/.zshrc`` 里那一行 fpath(追加一次、带标记、已存在就不再写)。
+这里只用标准库:shell 由 ``$SHELL`` / ``PSModulePath`` 决定(规范禁止进程探测),
+落点是 `frontends.md` 数据归属表里的固定路径,**幂等覆盖**;为了让脚本真的被加载,
+只在必要时补一行带标记的 rc(已存在则不再写)。
 """
 
 from __future__ import annotations
@@ -29,21 +30,26 @@ PROG_NAME = "orzmc"
 SHELLS: tuple[str, ...] = ("bash", "zsh", "fish", "powershell", "pwsh")
 
 #: 按 ``frontends.md`` F6:``powershell`` / ``pwsh`` 只生成脚本、不落盘安装。
+#: 因此 ``completion install`` 对它们返回 ``E_UNSUPPORTED``(而不是假装成功)。
 SCRIPT_ONLY_SHELLS = frozenset({"powershell", "pwsh"})
 
 _ZSH_COMPLETION_DIR = ".zsh/completions"
+# 检测用片段(用户可能自己写过别的写法,只要含这一句就不再追加)
 _ZSH_FPATH_SNIPPET = "fpath+=(~/.zsh/completions)"
-_ZSH_RC_BLOCK = (
-    "# added by orzmc completion install(zsh 需要 fpath 含 ~/.zsh/completions)\n"
-    f"{_ZSH_FPATH_SNIPPET}; autoload -Uz compinit; compinit\n"
-)
+# 实际写入的整行:光加 fpath 不够,还要 compinit 才会生效
+_ZSH_RC_LINE = f"{_ZSH_FPATH_SNIPPET}; autoload -Uz compinit; compinit"
+_ZSH_RC_MARKER = "# added by orzmc completion install(zsh 需要 fpath 含 ~/.zsh/completions)"
+
+
+class UnsupportedInstall(ValueError):
+    """该 shell 不支持自动落盘(``frontends.md`` F6):只生成脚本。"""
 
 
 class InstallResult(NamedTuple):
-    """安装结果:落点(``None`` = 该 shell 不落盘)、给用户看的提示。"""
+    """安装结果:落点与给用户看的提示。"""
 
     shell: str
-    path: Path | None
+    path: Path
     hint: str
 
 
@@ -84,37 +90,50 @@ def target_path(shell: str, home: Path) -> Path | None:
 
 
 def install(shell: str, script: str, *, home: Path | None = None) -> InstallResult:
-    """幂等覆盖补全脚本(同路径覆盖即为最新),返回落点与提示。"""
+    """幂等覆盖补全脚本(同路径覆盖即为最新),返回落点与提示。
+
+    Raises:
+        UnsupportedInstall: ``powershell`` / ``pwsh``(规范 F6:只生成脚本)。
+        ValueError: 不认识的 shell。
+    """
     if shell not in SHELLS:
         raise ValueError(f"不支持的 shell: {shell}")
     if shell in SCRIPT_ONLY_SHELLS:
-        return InstallResult(
-            shell,
-            None,
-            f"{shell} 不自动落盘(规范 F6):把 `orzmc completion {shell}` 的输出加入 $PROFILE",
+        raise UnsupportedInstall(
+            f"{shell} 不支持自动安装补全(规范 F6):把 `orzmc completion {shell}` 的输出加入 $PROFILE"
         )
     base = Path.home() if home is None else home
     path = target_path(shell, base)
-    assert path is not None  # SCRIPT_ONLY_SHELLS 已提前返回
+    assert path is not None  # SCRIPT_ONLY_SHELLS 已提前抛错
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(script.rstrip("\n") + "\n", encoding="utf-8")
-    if shell == "zsh":
-        hint = _ensure_zsh_fpath(base)
-    elif shell == "bash":
-        hint = "需要 bash-completion(多数发行版默认安装);若未生效,在 ~/.bashrc 里 source 上面这个文件"
+    if shell == "bash":
+        # 落点在 bash-completion 的标准目录:装了 bash-completion 会自动加载;
+        # 没装(如 macOS 自带 bash 3.2)则必须 source,否则补全根本不生效。
+        hint = _ensure_rc_line(
+            base / ".bashrc",
+            f'[ -f "{path}" ] && . "{path}"',
+            marker="# added by orzmc completion install(bash 未装 bash-completion 时也能生效)",
+        )
+    elif shell == "zsh":
+        hint = _ensure_rc_line(
+            base / ".zshrc",
+            _ZSH_RC_LINE,
+            marker=_ZSH_RC_MARKER,
+            detect=_ZSH_FPATH_SNIPPET,
+        )
     else:
         hint = ""
     return InstallResult(shell, path, hint)
 
 
-def _ensure_zsh_fpath(home: Path) -> str:
-    """确保 ``~/.zshrc`` 里有一次 ``fpath+=(~/.zsh/completions)``;已存在则不动。"""
-    rc = home / ".zshrc"
+def _ensure_rc_line(rc: Path, line: str, *, marker: str, detect: str | None = None) -> str:
+    """幂等地把 ``line`` 加进 rc 文件;``detect``(缺省=``line``)已存在则什么都不做。"""
     existing = rc.read_text(encoding="utf-8", errors="replace") if rc.is_file() else ""
-    if _ZSH_FPATH_SNIPPET in existing:
+    if (detect or line) in existing:
         return ""
     with rc.open("a", encoding="utf-8") as handle:
         if existing and not existing.endswith("\n"):
             handle.write("\n")
-        handle.write(_ZSH_RC_BLOCK)
-    return f"已在 {rc} 追加 fpath 配置(带 orzmc 标记);重启 shell 生效"
+        handle.write(f"{marker}\n{line}\n")
+    return f"已在 {rc} 追加一行(带 orzmc 标记);新开终端或 source 后生效"

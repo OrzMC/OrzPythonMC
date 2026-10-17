@@ -13,6 +13,7 @@ import pytest
 from orzmc_app.cli.completions import (
     PROG_NAME,
     SHELLS,
+    UnsupportedInstall,
     install,
     normalize_shell,
     resolve_shell,
@@ -81,6 +82,14 @@ class TestInstall:
         assert second.path == path
         assert path.read_text() == "# script\n"
 
+    def test_bash_wires_rc_once(self, tmp_path: Path) -> None:
+        # 落点在 bash-completion 目录;没装 bash-completion(如 macOS bash 3.2)时
+        # 只能靠 source,所以必须幂等地补一行 rc。
+        install("bash", "# script\n", home=tmp_path)
+        install("bash", "# script\n", home=tmp_path)
+        rc = (tmp_path / ".bashrc").read_text()
+        assert rc.count("added by orzmc") == 1
+
     def test_zsh_adds_fpath_once(self, tmp_path: Path) -> None:
         install("zsh", "# script\n", home=tmp_path)
         install("zsh", "# script\n", home=tmp_path)
@@ -103,10 +112,10 @@ class TestInstall:
         assert any("added by orzmc" in line for line in lines)
 
     @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
-    def test_script_only_shells_write_nothing(self, shell: str, tmp_path: Path) -> None:
-        result = install(shell, "# script\n", home=tmp_path)
-        assert result.path is None
-        assert result.hint
+    def test_script_only_shells_are_unsupported(self, shell: str, tmp_path: Path) -> None:
+        # frontends.md F6:只生成脚本、不落盘 → 明确报不支持,而不是 ok:true + path:null。
+        with pytest.raises(UnsupportedInstall):
+            install(shell, "# script\n", home=tmp_path)
         assert list(tmp_path.iterdir()) == []
 
     def test_unknown_shell_raises(self, tmp_path: Path) -> None:

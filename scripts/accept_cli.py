@@ -74,6 +74,14 @@ class CheckError(AssertionError):
     """断言失败(带上下文,便于定位)。"""
 
 
+class SkipCase(Exception):
+    """前置条件不满足(如未提供规范快照):记 SKIP,不算失败。"""
+
+
+def skip(reason: str) -> None:
+    raise SkipCase(reason)
+
+
 def check(condition: object, message: str) -> None:
     if not condition:
         raise CheckError(message)
@@ -178,6 +186,7 @@ class Context:
     sandbox: Sandbox
     frozen: bool
     verbose: bool
+    state_paths: Path | None = None
 
     def run(self, *args: str, **kwargs: object) -> Result:
         return self.sandbox.run(*args, **kwargs)  # type: ignore[arg-type]
@@ -453,31 +462,59 @@ def case_completion_unknown_shell(ctx: Context) -> None:
 def case_completion_install(ctx: Context) -> None:
     home = ctx.sandbox.home
     if os.name == "nt":
-        # Windows:按 frontends.md F6,powershell/pwsh 只生成脚本、不落盘。
-        payload = expect_ok(ctx.run("--json", "completion", "install"), "completion")
+        # Windows 默认 shell 是 powershell,而 F6 规定它只生成脚本 → 必须明确报不支持。
+        expect_error(ctx.run("--json", "completion", "install"), "completion", "E_UNSUPPORTED")
+        return
+
+    targets = {
+        "bash": home / ".local" / "share" / "bash-completion" / "completions" / "orzmc",
+        "zsh": home / ".zsh" / "completions" / "_orzmc",
+    }
+    for shell, script in targets.items():
+        payload = expect_ok(ctx.run("--json", "completion", "install", env={"SHELL": f"/bin/{shell}"}), "completion")
         data = payload["data"]
         assert isinstance(data, dict)
-        check(data.get("path") is None, f"Windows 上不应落盘: {data}")
-        check(isinstance(data.get("hint"), str) and data["hint"], f"应给出提示: {data}")
-        return
-    payload = expect_ok(
-        ctx.run("--json", "completion", "install", env={"SHELL": "/bin/zsh"}),
-        "completion",
-    )
-    data = payload["data"]
-    assert isinstance(data, dict)
-    script = home / ".zsh" / "completions" / "_orzmc"
-    check(data.get("shell") == "zsh", f"应识别出 zsh: {data}")
-    check(script.is_file(), f"未写入补全脚本: {script}")
-    body = script.read_text(encoding="utf-8")
-    check("orzmc" in body or "compdef" in body or "complete" in body, f"补全脚本内容可疑: {body[:200]!r}")
-    rc = home / ".zshrc"
-    check(rc.is_file(), "zsh 需要 fpath,应写入 ~/.zshrc")
-    first = rc.read_text(encoding="utf-8")
-    # 幂等:再装一次,rc 不重复追加、脚本内容不变。
-    expect_ok(ctx.run("--json", "completion", "install", env={"SHELL": "/bin/zsh"}), "completion")
-    check(rc.read_text(encoding="utf-8") == first, "重复安装不应修改 rc(必须幂等)")
-    check(first.count("fpath+=(~/.zsh/completions)") == 1, "fpath 行应恰好一条")
+        check(data.get("shell") == shell, f"应识别出 {shell}: {data}")
+        check(data.get("path") == str(script), f"落点应为 {script}: {data}")
+        check(script.is_file(), f"未写入补全脚本: {script}")
+        check(script.read_text(encoding="utf-8").strip() != "", "补全脚本为空")
+        rc = home / (".bashrc" if shell == "bash" else ".zshrc")
+        check(rc.is_file(), f"{shell} 需要 rc 里有一行加载语句(否则补全不生效)")
+        before = rc.read_text(encoding="utf-8")
+        check(before.count("added by orzmc") == 1, f"{shell} rc 应恰好一条 orzmc 标记行: {before!r}")
+        # 幂等:再装一次不重复改 rc、脚本内容不变。
+        expect_ok(ctx.run("--json", "completion", "install", env={"SHELL": f"/bin/{shell}"}), "completion")
+        check(rc.read_text(encoding="utf-8") == before, f"{shell} 重复安装不应再改 rc(必须幂等)")
+        check(script.read_text(encoding="utf-8").strip() != "", "补全脚本被清空")
+
+
+@case("completion", "install-paths-match-state-paths")
+def case_completion_paths_match_snapshot(ctx: Context) -> None:
+    """`frontends.md` §7「待补 1」:补全落点必须与 `state-paths.json` 逐项一致(防路径漂移)。"""
+    if ctx.state_paths is None:
+        skip("未提供 --state-paths docs/spec/state-paths.json")
+    snapshot = json.loads(ctx.state_paths.read_text(encoding="utf-8"))
+    unix_paths = (snapshot.get("unix") or {}).get("completion") or {}
+    check(isinstance(unix_paths, dict) and unix_paths, f"state-paths.json 缺 unix.completion: {snapshot}")
+    home = str(ctx.sandbox.home)
+    for shell, template in unix_paths.items():
+        expected = str(template).replace("$HOME", home)
+        result = ctx.run("--json", "completion", "install", env={"SHELL": f"/bin/{shell}"})
+        payload = expect_ok(result, "completion")
+        data = payload["data"]
+        assert isinstance(data, dict)
+        check(data.get("path") == expected, f"{shell} 落点与 state-paths.json 不一致: {data.get('path')} != {expected}")
+
+
+@case("completion", "script-only-shells-are-unsupported")
+def case_completion_script_only(ctx: Context) -> None:
+    """`frontends.md` F6:powershell/pwsh 只生成脚本,`install` 必须明确 E_UNSUPPORTED。"""
+    for shell in ("powershell", "pwsh"):
+        result = ctx.run("--json", "completion", "install", env={"SHELL": f"/usr/bin/{shell}"})
+        payload = expect_error(result, "completion", "E_UNSUPPORTED")
+        error = payload["error"]
+        assert isinstance(error, dict)
+        check(f"completion {shell}" in str(error.get("message")), f"应提示改用 `completion {shell}`: {error}")
 
 
 @case("completion", "install-without-shell-is-usage-error")
@@ -644,11 +681,13 @@ class Outcome:
     duration: float = 0.0
 
 
-def run_case(case_: Case, sandbox: Sandbox, *, verbose: bool) -> Outcome:
-    ctx = Context(sandbox=sandbox, frozen=sandbox.frozen, verbose=verbose)
+def run_case(case_: Case, sandbox: Sandbox, *, verbose: bool, state_paths: Path | None) -> Outcome:
+    ctx = Context(sandbox=sandbox, frozen=sandbox.frozen, verbose=verbose, state_paths=state_paths)
     started = time.monotonic()
     try:
         case_.func(ctx)
+    except SkipCase as exc:
+        return Outcome(case_, "SKIP", str(exc), time.monotonic() - started)
     except CheckError as exc:
         return Outcome(case_, "FAIL", str(exc), time.monotonic() - started)
     except subprocess.TimeoutExpired as exc:
@@ -690,11 +729,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--list", action="store_true", help="列出用例组后退出")
     parser.add_argument("--list-cases", action="store_true", help="列出全部用例后退出")
     parser.add_argument("--timeout", type=float, default=90.0, help="单个用例超时秒数(默认 90)")
+    parser.add_argument(
+        "--state-paths",
+        help="规范快照 docs/spec/state-paths.json(提供时额外断言补全落点与之逐项一致,防路径漂移)",
+    )
     parser.add_argument("--keep", action="store_true", help="保留沙箱目录(排障用)")
     parser.add_argument("-v", "--verbose", action="store_true", help="打印每个用例的命令与输出")
     args = parser.parse_args(argv)
 
     cli, frozen = build_cli(args.cli)
+    state_paths = Path(args.state_paths).expanduser().resolve() if args.state_paths else None
+    if state_paths is not None and not state_paths.is_file():
+        raise SystemExit(f"--state-paths 指向的文件不存在: {state_paths}")
     only = {item.strip() for item in args.only.split(",") if item.strip()}
     cases = selected_cases(only=only, network=args.network, frozen=frozen)
 
@@ -723,7 +769,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     outcomes: list[Outcome] = []
     try:
         for case_ in cases:
-            outcome = run_case(case_, sandbox, verbose=args.verbose)
+            outcome = run_case(case_, sandbox, verbose=args.verbose, state_paths=state_paths)
             outcomes.append(outcome)
             label = f"[{outcome.status}] {case_.group}/{case_.name} ({outcome.duration:.1f}s)"
             print(label)
@@ -738,9 +784,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             sandbox.cleanup()
 
     passed = sum(1 for item in outcomes if item.status == "PASS")
+    skipped = [item for item in outcomes if item.status == "SKIP"]
     failed = [item for item in outcomes if item.status == "FAIL"]
     print()
-    print(f"结果: {passed} 通过 / {len(failed)} 失败 / 共 {len(outcomes)}")
+    print(f"结果: {passed} 通过 / {len(failed)} 失败 / {len(skipped)} 跳过 / 共 {len(outcomes)}")
+    for item in skipped:
+        print(f"  SKIP {item.case.group}/{item.case.name}: {item.detail}")
     if failed:
         print("\n失败用例:")
         for item in failed:

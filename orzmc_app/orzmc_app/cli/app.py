@@ -35,6 +35,7 @@ from orzmc import (
     kill_all_servers,
     launch_client,
     list_versions,
+    record_completion_file,
     remove_version,
     resolve_client_id,
     running_binary,
@@ -48,8 +49,8 @@ from orzmc.infra.log import RichReporter
 from orzmc.infra.progress import RichProgress
 from orzmc_app import __version__ as APP_VERSION
 from orzmc_app.cli.completions import SHELLS as INSTALLABLE_SHELLS
+from orzmc_app.cli.completions import UnsupportedInstall, resolve_shell
 from orzmc_app.cli.completions import install as install_completion
-from orzmc_app.cli.completions import resolve_shell
 from orzmc_app.cli.introspect import command_specs
 from orzmc_app.cli.options import (
     DownloadThreads,
@@ -764,18 +765,21 @@ def completion(
                 code="E_USAGE",
             )
         script = get_completion_script(prog_name=_prog_name(ctx), complete_var=_complete_var(ctx), shell=shell)
-        result = install_completion(shell, script)
-        _emit(
-            {
-                "mode": "install",
-                "shell": result.shell,
-                "path": str(result.path) if result.path is not None else None,
-                "hint": result.hint or None,
-            }
-        )
+        try:
+            result = install_completion(shell, script)
+        except UnsupportedInstall as exc:
+            # 规范 F6:powershell/pwsh 只生成脚本、不落盘 —— 明确报「不支持自动安装」,
+            # 不要用 ok:true + path:null 让脚本误以为装好了。
+            _fail(str(exc), code="E_UNSUPPORTED")
+        # 登记进 install.conf,`uninstall` 才清得掉(install-update.md §9 / F2)。
+        # 尽力而为:没有安装记录(venv / 开发环境)或写盘失败都不该让补全安装失败。
+        try:
+            record_completion_file(str(result.path))
+        except Exception as exc:  # pragma: no cover - IO 异常,不影响补全本身
+            _reporter(ctx).debug(f"未能登记补全路径: {exc}")
+        _emit({"mode": "install", "shell": result.shell, "path": str(result.path), "hint": result.hint or None})
         if not _json_mode():
-            where = str(result.path) if result.path is not None else "(该 shell 不落盘)"
-            _console.print(f"[success]已安装 {shell} 补全:[/success] {where}")
+            _console.print(f"[success]已安装 {shell} 补全:[/success] {result.path}")
             if result.hint:
                 _console.print(result.hint, style="dim")
         return

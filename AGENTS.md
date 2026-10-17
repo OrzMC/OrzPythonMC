@@ -159,7 +159,7 @@ uv lock                            # 锁定依赖
 2. **错误写 stderr,结果写 stdout**(规范 §6)。`_fail` 用 `_console_err`;`_reporter(ctx)` 在 `--json` 时把库日志切 stderr —— 所以**别自己 new `RichReporter`**(`uninstall` 曾因此把库日志写进 stdout,破坏「stdout 恰好一个信封」)。`RichReporter` 会给注入的 Console `push_theme`,所以 `Console(stderr=True)` 也能正常渲染 `style="info"`(缺 theme 时第一次日志就 `MissingStyle` → 被兜成 `E_RUNTIME`)。
 3. **退出码只有 0 / 1 / 130**(规范 §6)。用户取消 = `E_CANCELLED` → 130;click 的用法错误默认 2,由 `orzmc_app.cli.main()` 收敛成 1。
 4. **需要确认的命令在非交互环境必须显式 `--yes`**,否则 `E_CANCELLED`/130(`remove`、`uninstall`;规范 §8.2 + [`frontends.md`](../../docs/spec/frontends.md) F2)。非 TTY 绝不等待输入(§7 红线)。
-5. **补全收口在 `orzmc completion`**:`add_completion=True` 只为注册 typer 的补全类(click 处理 `_ORZMC_COMPLETE` 的动态补全依赖它),随后 `app._add_completion = False` 摘掉 typer 自带的 `--install-completion`/`--show-completion`(与 `completion` 重复、英文文案、且只能靠 shellingham 探测 shell)。`completion install` 走 `orzmc_app/cli/completions.py`:**从 `$SHELL`/`PSModulePath` 推断(不 import shellingham)、固定落点幂等覆盖、不改执行策略**;唯一会写的 rc 是 zsh `~/.zshrc` 里的 fpath 行(带标记、已存在不重复写)。`powershell`/`pwsh` 按 F6 只生成脚本、不落盘。
+5. **补全收口在 `orzmc completion`**(契约见父仓库 `docs/spec/cli-surface.md` §4.5 / `frontends.md` F6):`add_completion=True` 只为注册 typer 的补全类(click 处理 `_ORZMC_COMPLETE` 的动态补全依赖它),随后 `app._add_completion = False` 摘掉 typer 自带的 `--install-completion`/`--show-completion`(与 `completion` 重复、英文文案、且只能靠 shellingham 探测 shell)。`completion install` 走 `orzmc_app/cli/completions.py`:**从 `$SHELL`/`PSModulePath` 推断(不 import shellingham)、固定落点幂等覆盖、不改执行策略**;rc 只在 shell 不会自动加载落点时补一行(bash `source` / zsh `fpath`,带标记、已存在不重复写;fish 无需 rc)。`powershell`/`pwsh` 按 F6 **只生成脚本、不落盘**,`install` 对它们返回 `E_UNSUPPORTED`(不是「成功但没装」);落盘成功后把路径登记进 `install.conf` 的 `completion_file`,由 `uninstall` 清理。
 6. **PyInstaller 必须显式收集「动态 import」的依赖**(`scripts/build.py` 的 `--collect-submodules shellingham`)。shellingham 用 `importlib.import_module(f".{os.name}")` 导入平台实现,静态分析看不到 → 冻结二进制缺 `shellingham.posix`/`nt` → 任何探测直接 `RuntimeError`(2.11.0 及更早的发布版 `completion install` / `--show-completion` 全崩,而单测全绿)。新增/升级依赖时先问「它有没有动态 import」,再交给 `binary` job 的 `--cli` 验收兜住。
 
 **`scripts/accept_cli.py`(CLI 自动化验收)**:按**规范**而不是按实现对**真实进程**断言,用例分组:
@@ -169,12 +169,12 @@ uv lock                            # 锁定依赖
 | `surface` | 无参打印帮助、`-h`/`--help`、每个命令的帮助、`version` 与 `--version` 一致、用法错误退出 1、全局选项位置 |
 | `envelope` | 每个命令 `--json` 下 stdout **恰好一个** JSON 对象;失败码稳定且退出码匹配;stdout 不混人类可读行 |
 | `contract` | 取消语义(130 且数据不动)、`list` 识别已安装版本、非交互不阻塞 |
-| `completion` | 各 shell 脚本非空、未知 shell 报 `E_USAGE`、`install` 落点 + 幂等 + rc 只写一次、无 `$SHELL` 时给可执行提示 |
+| `completion` | 各 shell 脚本非空、未知 shell 报 `E_USAGE`、`install` 落点 + 幂等 + rc 只写一次、`powershell`/`pwsh` 报 `E_UNSUPPORTED`、无 `$SHELL` 时给可执行提示;给 `--state-paths` 时逐项比对父仓库 `state-paths.json`(防路径漂移) |
 | `mcp` | stdio JSON-RPC 全会话(`initialize`/`tools/list`/`tools/call`/`ping`/未知方法/坏 JSON)、排除集、`isError` 语义 |
 | `frozen` | 仅 `--cli` 时:动态补全分发、typer 那两个选项确已移除、`completion install` 不崩 |
 | `network` | 默认不跑;`--network` 才跑 `update --check` / `plugin --search`(限流也算「有信封地失败」) |
 
-每个用例一个隔离沙箱(HOME / XDG_* / 游戏根)、`stdin=DEVNULL` + 超时(「非交互不阻塞」本身就是被测行为)。CI:**`quality` 跑源码模式;`binary` 6 平台各跑一遍 `--cli dist/orzmc`** —— 后者是冻结二进制唯一的守门人。
+每个用例一个隔离沙箱(HOME / XDG_* / 游戏根)、`stdin=DEVNULL` + 超时(「非交互不阻塞」本身就是被测行为)。缺前置条件的用例记 `SKIP`(不算失败)。CI:**`quality` 跑源码模式并带 `--state-paths parent/docs/spec/state-paths.json`;`binary` 6 平台各跑一遍 `--cli dist/orzmc`** —— 后者是冻结二进制唯一的守门人。
 
 ## 代码规范
 

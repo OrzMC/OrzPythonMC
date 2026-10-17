@@ -737,3 +737,25 @@ def test_completion_install_without_shell_is_usage_error(monkeypatch, tmp_path) 
     payload = json.loads(result.stdout)
     assert payload["error"]["code"] == "E_USAGE"
     assert "completion <shell>" in payload["error"]["message"]
+
+
+def test_completion_install_registers_file_for_uninstall(monkeypatch, tmp_path) -> None:
+    """F2/§9:装完补全要登记进 install.conf,`uninstall` 才清得掉。"""
+    home = _sandbox_home(monkeypatch, tmp_path)
+    seen: list[str] = []
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.delenv("PSModulePath", raising=False)
+    monkeypatch.setattr(app_module, "record_completion_file", lambda path: seen.append(path))
+    assert runner.invoke(app, ["completion", "install"]).exit_code == 0
+    assert seen == [str(home / ".zsh/completions/_orzmc")]
+
+
+def test_completion_install_powershell_is_unsupported(monkeypatch, tmp_path) -> None:
+    """F6:powershell/pwsh 只生成脚本 → `install` 明确返回 E_UNSUPPORTED。"""
+    _sandbox_home(monkeypatch, tmp_path)
+    for shell in ("powershell", "pwsh"):
+        result = runner.invoke(app, ["--json", "completion", "install"], env={"SHELL": shell})
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["error"]["code"] == "E_UNSUPPORTED"
+        assert "completion " + shell in payload["error"]["message"]

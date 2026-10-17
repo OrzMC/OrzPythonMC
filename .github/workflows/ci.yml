@@ -85,21 +85,23 @@ jobs:
         run: uv run mypy
       - name: Tests
         run: uv run --all-packages pytest
-      # CLI 行为验收(规范面):信封 / 退出码 / 取消语义 / 补全落点 / MCP,全部走
-      # **真实进程**。unit test 用 CliRunner 在进程内调用,覆盖不到进程退出码、
-      # 非 TTY 分支、真实文件落点 —— 这里补上。
-      - name: CLI acceptance (source mode)
-        run: uv run --all-packages python scripts/accept_cli.py
-      - name: Build both packages
-        run: uv build --all-packages
 
-      # 命令面单一化（规范 docs/spec/cli-surface.md §8.3，路线 A）：用真实
-      # `orzmc --json capabilities` 与父仓库 manifest 对比，未声明漂移即红灯。
-      - name: Checkout parent (CLI surface manifest)
+      # 命令面与行为契约都在父仓库的规范里:检出它,既给 surface 校验用 manifest,
+      # 也给 CLI 验收用 state-paths.json(补全落点逐项比对)。
+      - name: Checkout parent (spec manifest / snapshots)
         uses: actions/checkout@v7
         with:
           repository: OrzMC/OrzMC
           path: parent
+
+      # CLI 行为验收(规范面):信封 / 退出码 / 取消语义 / 补全落点 / MCP,全部走
+      # **真实进程**。unit test 用 CliRunner 在进程内调用,覆盖不到进程退出码、
+      # 非 TTY 分支、真实文件落点 —— 这里补上。
+      - name: CLI acceptance (source mode)
+        run: uv run --all-packages python scripts/accept_cli.py --state-paths parent/docs/spec/state-paths.json
+      - name: Build both packages
+        run: uv build --all-packages
+
       - name: CLI surface check (strict)
         run: |
           uv run --all-packages orzmc --json capabilities > "$RUNNER_TEMP/caps.json"
