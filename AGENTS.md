@@ -53,7 +53,7 @@ python/                         # uv workspace 根
   .github/workflows/{ci,acceptance,release,release-please,pages}.yml
   .github/{dependabot.yml,PULL_REQUEST_TEMPLATE.md}  release-please-config.json
   .release-please-manifest.json  CHANGELOG.md(机器人维护)  CONTRIBUTING.md
-  scripts/{build,acceptance,accept_selfupdate}.py
+  scripts/{build,acceptance,accept_selfupdate,accept_cli}.py
   docs/index.html                # 官网(静态单页,GitHub Pages 托管;最新版 tag 部署期注入)
   docs/install.sh  install.ps1   # 一键安装器(Unix sh / Windows PowerShell)
   docs/installer-design.md       # 安装器方案设计(历史评审稿,参考)
