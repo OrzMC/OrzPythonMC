@@ -653,7 +653,12 @@ def case_frozen_completion_install(ctx: Context) -> None:
     """2.11.0 及更早发布版的崩溃点:shellingham 动态子模块未被 PyInstaller 收集。"""
     result = ctx.run("--json", "completion", "install", env={"SHELL": "/bin/zsh"} if os.name != "nt" else None)
     no_crash(result)  # 关键断言:不得出现 ModuleNotFoundError / RuntimeError 栈
-    check(result.returncode == 0, "冻结二进制里 completion install 必须可用:\n" + result.describe())
+    if os.name == "nt":
+        # Windows 上没有 $SHELL → powershell,按 F6 明确「不支持自动安装」——这是**正确**行为,
+        # 只要不是崩溃即可(以前这里直接崩在 shellingham)。
+        expect_error(result, "completion", "E_UNSUPPORTED")
+        return
+    expect_ok(result, "completion")
 
 
 # ── network(默认不跑)──────────────────────────────────────────────────────
