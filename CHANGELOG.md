@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.10.0...v2.11.0) (2026-10-17)
+
+
+### Features
+
+* **cli:** capabilities 上报实际支持的枚举值 ([#67](https://github.com/OrzMC/OrzPythonMC/issues/67)) ([74578c1](https://github.com/OrzMC/OrzPythonMC/commit/74578c175233821a25a67cbe4e175728f17a66e8))
+
 ## [2.10.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.9.1...v2.10.0) (2026-10-17)
 
 
