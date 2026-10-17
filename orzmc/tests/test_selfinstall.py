@@ -126,6 +126,27 @@ class TestInstallManifest:
         assert 'path_line=export PATH="/x/bin:$PATH"' in text
         assert text.endswith("root_dir=/home/u/minecraft\n")
 
+    def test_surface_roundtrip(self, tmp_path) -> None:
+        """`surface` marks which front end installed the CLI (spec §3.1); missing = legacy."""
+        fs = FileStore()
+        path = str(tmp_path / "install.conf")
+        manifest = InstallManifest(binary="/x/orzmc", install_dir="/x", surface="gui")
+        manifest.write(fs, path)
+        assert fs.read_text(path).endswith("surface=gui\n")
+        assert InstallManifest.read(fs, path).surface == "gui"
+
+        legacy = str(tmp_path / "legacy.conf")
+        fs.write_text(legacy, "tool=orzmc\nschema=1\nbinary=/x/orzmc\nroot_dir=/x/mc\n")
+        assert InstallManifest.read(fs, legacy).surface is None
+
+    def test_update_replace_keeps_surface(self) -> None:
+        """`update` rewrites version/platform/source only; `surface` must survive."""
+        from dataclasses import replace
+
+        manifest = InstallManifest(binary="/x/orzmc", install_dir="/x", surface="gui", root_dir="/x/mc")
+        updated = replace(manifest, version="v9.9.9", platform="macos-arm64")
+        assert updated.surface == "gui"
+
     def test_omits_none_optionals(self, tmp_path) -> None:
         fs = FileStore()
         path = str(tmp_path / "install.conf")

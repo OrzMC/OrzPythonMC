@@ -275,6 +275,9 @@ function Write-Manifest {
     # Windows 不写 path_file;卸载还原 PATH 只需 install_dir 这一个 token
     if ($script:PathLine) { $lines += "path_line=$script:PathLine" }
     $lines += "root_dir=$script:RootDir"
+    # 哪个前端装了 CLI(docs/spec/install-update.md §3.1):GUI 触发时传 ORZMC_SURFACE=gui
+    $surface = if ($env:ORZMC_SURFACE -in @('cli', 'gui')) { $env:ORZMC_SURFACE } else { 'cli' }
+    $lines += "surface=$surface"
     # PS 5.1 Set-Content -Encoding UTF8 写 BOM;库侧 utf-8-sig 读取,兼容。
     Set-Content -Path $script:Manifest -Value $lines -Encoding UTF8
 }

@@ -6,6 +6,7 @@
 # 指定版本(绕过 GitHub API 限流):
 #   curl -fsSL https://orzmc.github.io/OrzPythonMC/install.sh | sh -s -- --version vX.Y.Z
 # 其它选项:--dir <path> / --no-modify-rc / --file <path>(本地安装,测试接缝)/ --uninstall。
+# 环境变量:ORZMC_SURFACE=cli|gui(写入 install.conf,标明哪个前端装了 CLI,缺省 cli)。
 #
 # 约束:macOS /bin/sh 是 bash 3.2 的 POSIX 模式,Linux /bin/sh 是 dash——
 #   无数组、无 [[ ]]、无 &>、无 sed -i、无 jq;JSON 解析用 grep/sed。
@@ -266,6 +267,11 @@ write_manifest() {
         printf 'path_line=%s\n' "$PATH_LINE" >> "$MANIFEST"
     fi
     printf 'root_dir=%s\n' "$ROOT_DIR" >> "$MANIFEST"
+    # 哪个前端装了 CLI(docs/spec/install-update.md §3.1):GUI 触发时传 ORZMC_SURFACE=gui
+    case "${ORZMC_SURFACE:-cli}" in
+        cli | gui) printf 'surface=%s\n' "${ORZMC_SURFACE:-cli}" >> "$MANIFEST" ;;
+        *) printf 'surface=cli\n' >> "$MANIFEST" ;;
+    esac
 }
 
 # ── 安装主流程 ───────────────────────────────────────────────────────────────

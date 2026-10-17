@@ -118,8 +118,13 @@ def schedule_delete_on_reboot(path: str) -> bool:
 class InstallManifest:
     """Install record written by the one-line installer (key=value lines).
 
-    Optional fields (``source`` / ``path_file`` / ``path_line``) are omitted
-    from the file when ``None``; values are everything after the first ``=``.
+    Optional fields (``source`` / ``path_file`` / ``path_line`` / ``surface``)
+    are omitted from the file when ``None``; values are everything after the
+    first ``=``.
+
+    ``surface`` (``cli`` / ``gui``) records **which front end wrote this record**,
+    used for identity checks in `docs/spec/install-update.md` §3.1; ``None`` means
+    a legacy record with unknown origin.
     """
 
     tool: str = "orzmc"
@@ -132,6 +137,7 @@ class InstallManifest:
     path_file: str | None = None
     path_line: str | None = None
     root_dir: str = DEFAULT_ROOT
+    surface: str | None = None
 
     # ── serialization ──────────────────────────────────────────────────────
 
@@ -151,6 +157,8 @@ class InstallManifest:
         if self.path_line is not None:
             lines.append(f"path_line={self.path_line}")
         lines.append(f"root_dir={self.root_dir}")
+        if self.surface is not None:
+            lines.append(f"surface={self.surface}")
         return lines
 
     @classmethod
@@ -176,6 +184,7 @@ class InstallManifest:
             path_file=fields.get("path_file"),
             path_line=fields.get("path_line"),
             root_dir=fields.get("root_dir", DEFAULT_ROOT),
+            surface=fields.get("surface"),
         )
 
     # ── persistence ────────────────────────────────────────────────────────
