@@ -130,11 +130,21 @@ jobs:
       # CLI 行为验收(规范面):信封 / 退出码 / 取消语义 / 补全落点 / MCP,全部走
       # **真实进程**。unit test 用 CliRunner 在进程内调用,覆盖不到进程退出码、
       # 非 TTY 分支、真实文件落点 —— 这里补上。
+      - name: Resolve the CLI entry point
+        # 源码模式的被测物直接给**入口脚本绝对路径**：沙箱会清空环境并切 cwd，
+        # 在沙箱里跑 `uv run ...` 解析不到项目（实测 "Failed to spawn: orzmc"）。
+        run: |
+          set -euo pipefail
+          bin="$(uv run --all-packages python -c 'import shutil; print(shutil.which("orzmc"))')"
+          test -n "$bin" || { echo "::error::找不到 orzmc 入口脚本"; exit 1; }
+          echo "ORZMC_BIN=$bin" >> "$GITHUB_ENV"
+          echo "被测入口: $bin"
+
       - name: CLI acceptance (source mode)
         # M2：验收脚本只有一份，在父仓库（`docs/two-cli-strategy.md`）。
         run: |
           python3 parent/scripts/accept/cli.py \
-            --cli 'uv run --all-packages orzmc' \
+            --cli "$ORZMC_BIN" \
             --state-paths parent/docs/spec/state-paths.json
       - name: Build both packages
         run: uv build --all-packages
