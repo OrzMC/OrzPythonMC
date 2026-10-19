@@ -194,12 +194,13 @@ uv lock                            # 锁定依赖
 ## 迭代流程(trunk-based + release-please)
 
 - **只有 `main` 是长期分支**(trunk),永远可发版;干活开短命分支(`feat/*`、`fix/*`、`docs/*`),用 PR 合入,**squash only**。`main` 有分支保护:必需检查 `quality` + `test (ubuntu-latest, x86_64)`,允许 admin 绕过(单人维护不被锁死)。
+  ⚠️ **release PR 也不例外**:`ci.yml` 若用 `branches-ignore: release-please--**` 把这类 PR 整条跳过,必需检查就**永不上报** → release PR 永久 BLOCKED(2026-10-19 实测,#75 只能 admin 绕过)。省成本的正确边界是「PR 上不跑 `binary`/`installer`(push-only)、`test` 矩阵并行」,**不是**跳过工作流。
 - **提交信息必须是 Conventional Commits**(`feat/fix/docs/chore/perf/test/ci/refactor`,可带 scope;破坏性变更 `feat!:` 或正文 `BREAKING CHANGE:`)。这不是风格问题:`release-please` 靠它推导版本号与 `CHANGELOG.md`,写错等于发版出错。
 - **合前重验收的正规入口**(不要为了验收去改 `ci.yml` 的 `on.push.branches` —— 那种临时改动容易误合进 main,历史上真这么干过):
   ```bash
   gh workflow run ci.yml --ref <branch> -f full=true   # 追加 6 平台 binary + installer
   ```
-  `ci.yml` 的 `binary`/`installer` 条件为 `(push 到分支) || inputs.full == true`;PR 默认只跑 `quality` + 6 平台 pytest,保持快速。
+  `ci.yml` 的 `binary`/`installer` 条件为 `(push 到分支) || inputs.full == true`;PR 默认只跑 `quality` + 6 平台 pytest,保持快速。release PR(release-please 开的)也走同一套:它只改版本号与 CHANGELOG,但**必需检查必须上报**,否则分支保护会把它永久锁住。
 - **版本号不手改**:`orzmc/version.py` 与 `orzmc_app/orzmc_app/__init__.py` 都带 `# x-release-please-version` 标记,由 release-please 的 release PR 一起 bump(两个文件锁步,`test_app_and_library_versions_match` 守着);`release-please-config.json` 用 generic updater 改这两处,`.release-please-manifest.json` 记录上一次发布的版本。因为两个 pyproject 都是 `dynamic`,`uv.lock` **不记录本地包版本**,release PR 不需要动 lock。
 - **版本策略(预稳定期)**:2.x 的破坏性 API 变更**不用** `feat!`/`BREAKING CHANGE:`(release-please 会直接推 major),走 minor + 在 `CHANGELOG.md` 里人工注明;等 API 冻结为 3.0.0 时再启用 `!`。
 - 依赖与 Actions 升级交给 `.github/dependabot.yml`(每周一,分组);`CONTRIBUTING.md` + PR 模板给人和 AI 智能体同一份清单。
