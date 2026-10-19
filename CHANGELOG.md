@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.13.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.12.0...v2.13.0) (2026-10-19)
+
+
+### Features
+
+* **m2:** 验收脚本改用父仓库共享实现（删除本地 842 行副本） ([#74](https://github.com/OrzMC/OrzPythonMC/issues/74)) ([e7b8d27](https://github.com/OrzMC/OrzPythonMC/commit/e7b8d27a8f423155dedb33edd81e17237bf60594))
+
 ## [2.12.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.11.0...v2.12.0) (2026-10-17)
 
 
