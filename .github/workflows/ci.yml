@@ -130,7 +130,10 @@ jobs:
       # **真实进程**。unit test 用 CliRunner 在进程内调用,覆盖不到进程退出码、
       # 非 TTY 分支、真实文件落点 —— 这里补上。
       - name: CLI acceptance (source mode)
-        run: uv run --all-packages python scripts/accept_cli.py --state-paths parent/docs/spec/state-paths.json
+        # M2：验收脚本只有一份，在父仓库（`docs/two-cli-strategy.md`）。
+        run: python3 parent/scripts/accept/cli.py \
+          --cli 'uv run --all-packages orzmc' \
+          --state-paths parent/docs/spec/state-paths.json
       - name: Build both packages
         run: uv build --all-packages
 
@@ -238,7 +241,9 @@ jobs:
       # RuntimeError。`scripts/build.py` 已 `--collect-submodules shellingham`,
       # 这里在「真的二进制」上把补全 / 信封 / MCP / 取消语义全跑一遍兜住回归。
       - name: CLI acceptance (frozen binary)
-        run: uv run --package orzmc-app python scripts/accept_cli.py --cli dist/orzmc
+        # 冻结二进制专属用例（PyInstaller 通路）用 `--frozen` 打开。
+        run: python3 parent/scripts/accept/cli.py --cli dist/orzmc --frozen \
+          --state-paths parent/docs/spec/state-paths.json
       - name: Upload binary
         uses: actions/upload-artifact@v7
         with:
