@@ -9,9 +9,11 @@ on:
       - "docs/**"
       - "LICENSE"
   pull_request:
-    # release-please 的分支只改版本号与 CHANGELOG，跑满 CI 纯浪费。
-    branches-ignore:
-      - "release-please--**"
+    # 注意:**不能**用 `branches-ignore: release-please--**` 把 release PR 整条跳过。
+    # main 的分支保护要求 `pr-title` / `quality` / `test (ubuntu-latest, x86_64)`,
+    # 工作流不跑 = 必需检查永不上报 = release PR 永久 BLOCKED(2026-10-19 实测:
+    # #75 卡死,只能 admin 绕过)。实测代价:PR 上本来就不跑 `binary`/`installer`
+    # (push-only),剩下的 test 矩阵**并行**,墙钟与跑单条腿差不多,所以直接照跑。
   # 合前重验收的正规入口:不跑本工作流的源分支上,也能随时把「6 平台二进制 +
   # 安装器 e2e」跑一遍(以前只能临时把分支加进 push.branches,那种改触发条件的
   # 做法容易误合进 main)。
