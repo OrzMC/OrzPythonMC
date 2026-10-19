@@ -65,6 +65,30 @@ jobs:
           PY
 
   # Platform-independent checks: run once, fail fast before fanning out.
+  # 能力台账校验（两套 CLI 并行期，见父仓库 docs/two-cli-strategy.md）：
+  # 用本实现的 capabilities 反向验证 docs/spec/parity.json 的声明
+  # （标 parity 必须真有、标 na 不许有），防止实现悄悄漂移。
+  ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout parent (spec + ledger)
+        uses: actions/checkout@v4
+        with:
+          repository: OrzMC/OrzMC
+          path: parent
+          sparse-checkout: |
+            docs/spec
+            scripts/verify
+      - uses: astral-sh/setup-uv@v5
+      - name: Verify ledger against capabilities
+        run: |
+          set -euo pipefail
+          uv sync --frozen
+          uv run orzmc --json capabilities > /tmp/caps.json
+          python3 parent/scripts/verify/parity.py --python-caps /tmp/caps.json
+
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
