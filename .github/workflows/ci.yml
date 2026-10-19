@@ -3,7 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+    # 纯文档/CHANGELOG 提交不跑 6 平台矩阵（实测：一次 CI 约 4–5 分钟）。
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
   pull_request:
+    # release-please 的分支只改版本号与 CHANGELOG，跑满 CI 纯浪费。
+    branches-ignore:
+      - "release-please--**"
   # 合前重验收的正规入口:不跑本工作流的源分支上,也能随时把「6 平台二进制 +
   # 安装器 e2e」跑一遍(以前只能临时把分支加进 push.branches,那种改触发条件的
   # 做法容易误合进 main)。
