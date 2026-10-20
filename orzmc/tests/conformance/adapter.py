@@ -31,12 +31,15 @@ from orzmc.domain.libraries import os_arch, os_key, resolve_libraries
 from orzmc.domain.options import MAX_DOWNLOAD_THREADS, RuntimeOptions
 from orzmc.domain.paths import PathLayout
 from orzmc.domain.types import GameType
+from orzmc.infra.auth_store import FILENAME as AUTH_FILENAME
 from orzmc.infra.cache import MetadataCache
-from orzmc.infra.fs import FileStore
+from orzmc.infra.fs import FileStore, default_state_dir
 from orzmc.infra.hashing import sha1_file
 from orzmc.infra.http import HttpClient
 from orzmc.infra.runner import normalize_exit_code
 from orzmc.infra.transfer import PARALLEL_MIN_SIZE, PARALLEL_PARTS
+from orzmc.services.selfinstall import MANIFEST_FILENAME
+from orzmc_app.cli.completions import target_path
 
 _DEFAULT_FIXTURES = Path(__file__).resolve().parents[4] / "docs" / "spec" / "fixtures"
 
@@ -463,7 +466,37 @@ def op_client_launch(g: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def op_state_paths(g: dict[str, Any]) -> dict[str, Any]:
+    """``statePaths``: 上报两端**实际使用**的共享落点 (规范 ``docs/spec/state-paths.json``).
+
+    平台与环境都从 ``given`` 注入, 而不是读宿主机 -- 否则 Windows 形态在 macOS 上永远测不到.
+    分隔符统一成 ``/`` (与其它 fixture 一致).
+    """
+    env = dict(g.get("env") or {})
+    windows = (g.get("platform") or {}).get("os") == "windows"
+    state_dir = default_state_dir(environ=env, is_windows=windows)
+    home = env.get("USERPROFILE" if windows else "HOME", "")
+    data: dict[str, Any] = {
+        "stateDir": state_dir,
+        "installRecord": os.path.join(state_dir, MANIFEST_FILENAME),
+        "authSession": os.path.join(state_dir, AUTH_FILENAME),
+        "gameRoot": os.path.join(home, "minecraft"),
+    }
+    if not windows:
+        # 补全落点复用应用层唯一的 target_path (不再抄一遍路径).
+        data["completion"] = {shell: str(target_path(shell, Path(home))) for shell in ("bash", "zsh", "fish")}
+    return {
+        key: (
+            {k: v.replace(os.sep, "/") for k, v in value.items()}
+            if isinstance(value, dict)
+            else value.replace(os.sep, "/")
+        )
+        for key, value in data.items()
+    }
+
+
 OPS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    "statePaths": op_state_paths,
     "planLayout": op_plan_layout,
     "requiredJava": op_required_java,
     "verifyArtifact": op_verify_artifact,

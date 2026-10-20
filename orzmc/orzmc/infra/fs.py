@@ -6,21 +6,33 @@ import json
 import os
 import shutil
 import tempfile
+from collections.abc import Mapping
 from typing import Any
 
 
-def default_state_dir() -> str:
+def default_state_dir(
+    *,
+    environ: Mapping[str, str] | None = None,
+    is_windows: bool | None = None,
+) -> str:
     """Per-user state dir (install manifest / auth token cache), platform-aware.
 
     Honors ``XDG_STATE_HOME`` (Unix) / ``LOCALAPPDATA`` (Windows) so the
     installer, ``uninstall`` and the auth token store agree on where
     per-user state lives, and so CI can redirect state into a temp dir for a
     hermetic run.
+
+    ``environ`` / ``is_windows`` 是给一致性套件用的**可注入接缝** -- 规范
+    ``docs/spec/state-paths.json`` 要求按平台求值, 而不是按宿主机. 默认值保持
+    "读 ``os.environ`` + 当前平台" 的原行为.
     """
-    if os.name == "nt":
-        base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+    env = os.environ if environ is None else environ
+    windows = (os.name == "nt") if is_windows is None else is_windows
+    home = env.get("USERPROFILE" if windows else "HOME") or os.path.expanduser("~")
+    if windows:
+        base = env.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
     else:
-        base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+        base = env.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
     return os.path.join(base, "orzmc")
 
 
