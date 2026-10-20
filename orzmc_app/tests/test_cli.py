@@ -138,6 +138,22 @@ def test_completion_rejects_unknown_shell() -> None:
     assert result.exit_code == 1
 
 
+def test_app_is_unsupported_outside_macos(monkeypatch) -> None:
+    """规范 ``install-update.md`` §8:非 macOS 上四个子命令**一律** ``E_UNSUPPORTED``。
+
+    三个「不许」都在这条里:不假装成功(``ok:true`` + 空 path)、不降级成 ``E_RUNTIME``、
+    不联网(先去查 release 再报错)。文案与 Swift 侧逐字一致,由共享验收 harness 兜住。
+    """
+    monkeypatch.setattr(sys, "platform", "linux")
+    for action in ("status", "install", "open", "uninstall"):
+        result = runner.invoke(app, ["--json", "app", action, "--yes"])
+        assert result.exit_code == 1, action
+        payload = json.loads(result.stdout)
+        assert payload["ok"] is False, action
+        assert payload["error"]["code"] == "E_UNSUPPORTED", action
+        assert payload["error"]["message"] == app_module._APP_UNSUPPORTED, action
+
+
 # ── capabilities(规范 §8)────────────────────────────────────────────────────
 
 
@@ -564,6 +580,8 @@ def test_app_status_json(monkeypatch) -> None:
             pass
 
         installed_path = "/tmp/OrzMC.app"
+        # 规范 §8:非 macOS 上命令会先看这个属性决定是否 E_UNSUPPORTED。
+        available = True
 
         def status(self) -> AppStatus:
             return AppStatus(installed=False, path="/tmp/OrzMC.app", version=None)
@@ -581,6 +599,8 @@ def test_app_unknown_action(monkeypatch) -> None:
             pass
 
         installed_path = "/tmp/OrzMC.app"
+        # 规范 §8:非 macOS 上命令会先看这个属性决定是否 E_UNSUPPORTED。
+        available = True
 
     monkeypatch.setattr(app_module, "AppInstaller", FakeInstaller)
     result = runner.invoke(app, ["app", "bogus"])

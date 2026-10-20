@@ -71,6 +71,9 @@ _console = Console(highlight=False)
 # 规范 §6:错误信息写 **stderr**(人类可读结果才进 stdout)。
 _console_err = Console(stderr=True, highlight=False)
 
+# 非 macOS 上 ``orzmc app`` 的固定报错(规范 install-update.md §8;与 Swift 侧逐字一致)。
+_APP_UNSUPPORTED = "「orzmc app」仅支持 macOS;当前平台不支持,请从 Release 下载应用包"
+
 # ``-h`` 是规范 §3 / ``cli-surface.json`` 的 ``globalOptions`` 要求(两套实现都要有);
 # click 的 ``help_option_names`` 会被子 context 继承,故根上写一次即可。
 app = typer.Typer(
@@ -644,9 +647,13 @@ def app_command(
 ) -> None:
     """跨面:安装 / 打开 / 卸载 GUI 应用(macOS)。"""
     _begin("app", ctx)
+    installer = AppInstaller(reporter=_reporter(ctx))
+    # 规范 §8:跨面安装的是 macOS `.app`——其它平台**一律** E_UNSUPPORTED,
+    # 且在碰网络/文件之前就返回(不假装成功、不降级成 E_RUNTIME)。
+    if not installer.available:
+        _fail(_APP_UNSUPPORTED, code="E_UNSUPPORTED")
     if channel not in ("release", "appstore"):
         _fail(f"未知渠道: {channel}(可选 release、appstore)")
-    installer = AppInstaller(reporter=_reporter(ctx))
     action = action.lower()
     if action == "status":
         state = installer.status()
