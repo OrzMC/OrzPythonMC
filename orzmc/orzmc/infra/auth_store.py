@@ -10,6 +10,7 @@ import json
 import os
 
 from orzmc.domain.auth import AuthSession
+from orzmc.infra.filelock import DEFAULT_TIMEOUT, STALE_AFTER_SECONDS, FileLock, lock_path
 from orzmc.infra.fs import FileStore, default_state_dir
 
 FILENAME = "auth.json"
@@ -46,3 +47,11 @@ class AuthStore:
 
     def clear(self) -> None:
         self._fs.remove(self._path)
+
+    def lock(self, *, timeout: float = DEFAULT_TIMEOUT, stale_after: float = STALE_AFTER_SECONDS) -> FileLock:
+        """跨进程锁 (``frontends.md`` F4.1): 刷新令牌的整个「读->换新->写」要持它.
+
+        与 Swift 侧算法逐字一致 (``<stateDir>/auth.lock`` 目录锁); 拿不到锁会抛
+        :class:`~orzmc.infra.filelock.LockTimeout` (``E_AUTH_LOCKED``).
+        """
+        return FileLock(lock_path(os.path.dirname(self._path)), timeout=timeout, stale_after=stale_after)
