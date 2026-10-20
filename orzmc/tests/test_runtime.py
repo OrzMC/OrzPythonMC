@@ -86,12 +86,13 @@ class TestResolveRuntime:
         state.mkdir(parents=True, exist_ok=True)
         (state / "install.conf").write_text(body, encoding="utf-8")
 
-    def test_fresh_install_defaults_to_swift(self, tmp_path) -> None:
-        assert self._resolve(tmp_path) == ("swift", "fresh-install")
+    def test_fresh_install_stays_python(self, tmp_path) -> None:
+        """全新安装**不**会被带去下载 Swift 真身(2026-10-20 决定: Python 是分发主体)。"""
+        assert self._resolve(tmp_path) == ("python", "default")
 
     def test_legacy_installer_user_stays_python(self, tmp_path) -> None:
         self._record(tmp_path, "tool=orzmc\nversion=2.16.0\nbinary=/x/orzmc\nsource=github:OrzMC/OrzPythonMC\n")
-        assert self._resolve(tmp_path) == ("python", "record:legacy")
+        assert self._resolve(tmp_path) == ("python", "default")
 
     def test_native_swift_install_uses_swift(self, tmp_path) -> None:
         self._record(tmp_path, "tool=orzmc\nversion=0.18.0\nbinary=/x/orzmc\nsource=github:OrzMC/OrzMCKit\n")
@@ -214,6 +215,21 @@ class TestInstall:
         # DLL 必须与 exe 同行(缺了会 STATUS_DLL_NOT_FOUND)。
         assert (pathlib.Path(state.path).parent / "swiftCore.dll").is_file()
 
+    def test_latest_tag_prefers_prereleases(self, tmp_path) -> None:
+        """实验通道:Swift 的 Release 是 pre-release,`/releases/latest` 不会指向它。"""
+        http = FakeHttp()
+        http.json_responses["/releases"] = [
+            {"tag_name": "v0.19.0", "draft": False, "prerelease": True},
+            {"tag_name": "v0.18.0", "draft": False, "prerelease": True},
+        ]
+        http.text_responses["SHA256SUMS"] = _sums("orzmc-linux-x86_64", SAFE_ELF)
+        http.canned["orzmc-linux-x86_64"] = SAFE_ELF
+        channel = _channel(tmp_path, http)
+
+        state = channel.install()
+
+        assert state.version == "0.19.0", "应取列表里最新的(即使它是 pre-release)"
+
     def test_offline_without_cached_payload_is_network_error(self, tmp_path) -> None:
         http = FakeHttp()  # 没有任何种子 → 无 API、无 302
         channel = _channel(tmp_path, http)
@@ -322,8 +338,8 @@ class TestForward:
         http = FakeHttp()
         channel = _channel(tmp_path, http)
         data = channel.status().to_dict()
-        # 没有 install.conf = pip 新装 → 默认判定为 swift(规范 §10.1)。
-        assert data["enabled"] is True
+        # 没有 install.conf = 全新安装 → **默认仍走 Python**(§10.1: 不自动下载 Swift)。
+        assert data["enabled"] is False
         assert data["installed"] is False
         # 版本号语义:真身版本与 launcher 版本分开报(规范 §10.1)。
         assert data["wrapper"] == __version__ == channel.status().to_dict()["wrapper"]
