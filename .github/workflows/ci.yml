@@ -266,8 +266,9 @@ jobs:
       - name: CLI acceptance (frozen binary)
         # 冻结二进制专属用例（PyInstaller 通路）用 `--frozen` 打开。
         run: |
-          python3 parent/scripts/accept/cli.py --cli dist/orzmc --frozen \
-            --state-paths parent/docs/spec/state-paths.json
+          # 一条命令写完:Windows runner 默认 shell 是 pwsh,`\` 不是续行(反引号才是),
+          # 拆成两行会报 `ParserError ... .ps1:3`(2026-10-20 实测)。
+          python3 parent/scripts/accept/cli.py --cli dist/orzmc --frozen --state-paths parent/docs/spec/state-paths.json
       - name: Upload binary
         uses: actions/upload-artifact@v7
         with:
