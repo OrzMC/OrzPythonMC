@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.17.2...v2.18.0) (2026-10-20)
+
+
+### Features
+
+* **auth:** auth.json 跨进程写锁 + runtime 真身损坏回滚 ([#96](https://github.com/OrzMC/OrzPythonMC/issues/96)) ([b713d8d](https://github.com/OrzMC/OrzPythonMC/commit/b713d8da638c039f318d49cea4a181815882476d))
+
 ## [2.17.2](https://github.com/OrzMC/OrzPythonMC/compare/v2.17.1...v2.17.2) (2026-10-20)
 
 ### ⚠️ 升级须知（`2.15–2.17` 的「默认走 Swift」实验已结束，本版回退）
