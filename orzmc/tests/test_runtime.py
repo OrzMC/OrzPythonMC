@@ -73,7 +73,13 @@ class TestResolveRuntime:
     """规范 §10.1「默认判定」: 新装给 swift, 存量安装保持 python."""
 
     def _env(self, tmp_path) -> dict[str, str]:
+        # 注入的 env 是 **unix 形状**(HOME/XDG_STATE_HOME),所以显式声明 is_windows=False ——
+        # 否则在 Windows runner 上会按 LOCALAPPDATA/USERPROFILE 解析,读不到我们写的记录
+        # (判定逻辑本身与平台无关,这里测的是判定逻辑)。
         return {"HOME": str(tmp_path), "XDG_STATE_HOME": str(tmp_path / "state")}
+
+    def _resolve(self, tmp_path, **extra: str) -> tuple[str, str]:
+        return resolve_runtime({**self._env(tmp_path), **extra}, is_windows=False)
 
     def _record(self, tmp_path, body: str) -> None:
         state = tmp_path / "state" / "orzmc"
@@ -81,25 +87,24 @@ class TestResolveRuntime:
         (state / "install.conf").write_text(body, encoding="utf-8")
 
     def test_fresh_install_defaults_to_swift(self, tmp_path) -> None:
-        assert resolve_runtime(self._env(tmp_path)) == ("swift", "fresh-install")
+        assert self._resolve(tmp_path) == ("swift", "fresh-install")
 
     def test_legacy_installer_user_stays_python(self, tmp_path) -> None:
         self._record(tmp_path, "tool=orzmc\nversion=2.16.0\nbinary=/x/orzmc\nsource=github:OrzMC/OrzPythonMC\n")
-        assert resolve_runtime(self._env(tmp_path)) == ("python", "record:legacy")
+        assert self._resolve(tmp_path) == ("python", "record:legacy")
 
     def test_native_swift_install_uses_swift(self, tmp_path) -> None:
         self._record(tmp_path, "tool=orzmc\nversion=0.18.0\nbinary=/x/orzmc\nsource=github:OrzMC/OrzMCKit\n")
-        assert resolve_runtime(self._env(tmp_path)) == ("swift", "record:native")
+        assert self._resolve(tmp_path) == ("swift", "record:native")
 
     def test_wrapper_channel_uses_swift(self, tmp_path) -> None:
         self._record(tmp_path, "tool=orzmc\nversion=0.18.0\nbinary=/x/orzmc\nchannel=wrapper\n")
-        assert resolve_runtime(self._env(tmp_path)) == ("swift", "record:wrapper")
+        assert self._resolve(tmp_path) == ("swift", "record:wrapper")
 
     def test_env_always_wins(self, tmp_path) -> None:
         self._record(tmp_path, "tool=orzmc\nversion=0.18.0\nbinary=/x/orzmc\nchannel=wrapper\n")
-        env = self._env(tmp_path)
-        assert resolve_runtime({**env, RUNTIME_ENV: "python"}) == ("python", "env:python")
-        assert resolve_runtime({RUNTIME_ENV: "swift"}) == ("swift", "env:swift")
+        assert self._resolve(tmp_path, **{RUNTIME_ENV: "python"}) == ("python", "env:python")
+        assert resolve_runtime({RUNTIME_ENV: "swift"}, is_windows=False) == ("swift", "env:swift")
 
 
 class TestPayloadAsset:
