@@ -52,16 +52,26 @@ class Authenticator:
 
     # ── 对外入口 ────────────────────────────────────────────────────────────
     def ensure(self) -> AuthSession:
-        """返回一个 MC 令牌有效的会话:缓存 → 刷新 → 设备码登录。"""
+        """返回一个 MC 令牌有效的会话:缓存 → 刷新 → 设备码登录。
+
+        **刷新必须持跨进程锁, 并在锁内先重读** (`frontends.md` F4/F4.1):
+        刷新会轮换 refresh token,两个前端同时刷会让后者的令牌立刻失效(用户被登出)。
+        """
         session = self._store.load()
         if session is not None and auth_map.token_state(session.expires_at, self._clock()).state == "valid":
             return replace(session, source="cache")
         if session is not None:
-            try:
-                return self.refresh(session.msa)
-            except AuthError:
-                # refresh token 被拒(如用户改密/撤销授权)→ 清掉重登,不吞错。
-                self._store.clear()
+            with self._store.lock():
+                # 锁内**重读**:另一个前端可能刚刷完,直接用它的结果,别再刷一次。
+                current = self._store.load()
+                if current is not None and auth_map.token_state(current.expires_at, self._clock()).state == "valid":
+                    return replace(current, source="cache")
+                target = current if current is not None else session
+                try:
+                    return self.refresh(target.msa)
+                except AuthError:
+                    # refresh token 被拒(如用户改密/撤销授权)→ 清掉重登,不吞错。
+                    self._store.clear()
         return self.login()
 
     def login(self) -> AuthSession:

@@ -318,6 +318,64 @@ class TestCoexistence:
         assert channel.status().to_dict()["reused"] is False
 
 
+# ── 真身损坏回滚(§10.1) ─────────────────────────────────────────────────────
+
+
+class TestPayloadRollback:
+    def _install_ok(self, tmp_path, http) -> RuntimeChannel:
+        http.json_responses["/releases"] = [{"tag_name": "v0.19.0", "draft": False}]
+        http.text_responses["SHA256SUMS"] = _sums("orzmc-linux-x86_64", SAFE_ELF)
+        http.canned["orzmc-linux-x86_64"] = SAFE_ELF
+        channel = _channel(tmp_path, http)
+        channel.install()
+        return channel
+
+    def test_install_keeps_previous_payload_as_backup(self, tmp_path) -> None:
+        http = FakeHttp()
+        channel = self._install_ok(tmp_path, http)
+        first = pathlib.Path(channel.path).read_bytes()
+
+        # 第二次安装换一份内容不同的真身
+        second = b"\x7fELF" + b"\x11" * 60
+        http.canned["orzmc-linux-x86_64"] = second
+        http.text_responses["SHA256SUMS"] = _sums("orzmc-linux-x86_64", second)
+        channel.install()
+
+        assert pathlib.Path(channel.path).read_bytes() == second
+        assert pathlib.Path(channel.backup_path).read_bytes() == first, "旧真身应留作 .bak"
+
+    def test_corrupt_payload_is_replaced_by_backup_before_run(self, tmp_path) -> None:
+        http = FakeHttp()
+        channel = self._install_ok(tmp_path, http)
+        # 再装一次,得到 .bak
+        second = b"\x7fELF" + b"\x22" * 60
+        http.canned["orzmc-linux-x86_64"] = second
+        http.text_responses["SHA256SUMS"] = _sums("orzmc-linux-x86_64", second)
+        channel.install()
+
+        # 模拟磁盘损坏:把当前真身写成垃圾
+        pathlib.Path(channel.path).write_bytes(b"\x00garbage")
+
+        path, _ = channel.resolve()
+
+        assert path == channel.path
+        restored = pathlib.Path(channel.path).read_bytes()
+        assert restored == SAFE_ELF, "应回滚到 .bak(上一版真身)的内容"
+        assert looks_like_executable(channel.path, is_windows=False), "回滚后必须是可执行文件"
+        assert not pathlib.Path(channel.backup_path).exists(), ".bak 已被提升(消费掉)"
+
+    def test_corrupt_payload_without_backup_still_reported(self, tmp_path) -> None:
+        http = FakeHttp()
+        channel = self._install_ok(tmp_path, http)
+        pathlib.Path(channel.path).write_bytes(b"\x00garbage")
+
+        path, _ = channel.resolve()
+
+        # 没有 .bak 可回滚:不静默删文件,交给上层报错(forward 会给出 E_RUNTIME)
+        assert path == channel.path
+        assert pathlib.Path(channel.path).exists()
+
+
 # ── 转发 ──────────────────────────────────────────────────────────────────────
 
 

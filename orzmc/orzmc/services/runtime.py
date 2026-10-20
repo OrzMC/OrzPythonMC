@@ -286,12 +286,67 @@ class RuntimeChannel:
         record = self._record()
         recorded = record.get("binary", "")
         source = record.get("source", "")
-        if recorded and _is_swift_payload(source, record.get("channel", "")) and self._runnable(recorded):
-            return recorded, source
         own = self.path
+        if recorded and _is_swift_payload(source, record.get("channel", "")) and self._runnable(recorded):
+            if recorded != own:
+                # 别人装的 Swift 原生版:直接用(它的备份与更新由那条通道负责,我们不插手)。
+                return recorded, source
+            # 是**我们自己的副本**:跑之前做魔数预检,坏了就用 .bak 回滚(§10.1)。
+            usable = self._verified_payload(recorded)
+            if usable is not None:
+                return usable, source
+            return own, source  # 坏且无备份:交给 forward 报 E_RUNTIME 并提示重装
         if self._fs.is_file(own):
-            return own, (source if recorded == own else f"github:{REPO}")
+            usable = self._verified_payload(own)
+            if usable is not None:
+                return usable, (source if recorded == own else f"github:{REPO}")
         return own, f"github:{REPO}"
+
+    @property
+    def backup_path(self) -> str:
+        """旧真身的备份路径 (同一目录 rename, 跨盘不会发生)."""
+        return self.path + ".bak"
+
+    def _replace_payload(self, staged: str) -> None:
+        """把新真身原子换上去; **先把旧的改名成 .bak**, 失败则还原 (规范 §10.1 回滚)."""
+        backup = self.backup_path
+        had_old = self._fs.is_file(self.path)
+        if had_old:
+            try:
+                if self._fs.is_file(backup):
+                    os.remove(backup)
+                os.replace(self.path, backup)
+            except OSError as exc:  # 备份失败就别动现有的 (安全优先)
+                raise RuntimeChannelError(f"无法备份旧真身: {exc}", "E_RUNTIME") from exc
+        try:
+            os.replace(staged, self.path)
+        except OSError as exc:
+            if had_old:
+                try:
+                    os.replace(backup, self.path)
+                except OSError:
+                    pass
+            raise RuntimeChannelError(f"写入真身失败: {exc}", "E_RUNTIME") from exc
+
+    def _recover_from_backup(self, reason: str) -> str | None:
+        """用 `.bak` 还原真身; 成功返回路径, 否则 ``None`` (规范 §10.1 回滚)."""
+        backup = self.backup_path
+        if not (self._fs.is_file(backup) and looks_like_executable(backup, self._windows)):
+            return None
+        try:
+            os.replace(backup, self.path)
+        except OSError:
+            return None
+        self._reporter.warn(f"真身不可用({reason}),已回滚到上一份: {self.path}")
+        return self.path
+
+    def _verified_payload(self, path: str) -> str | None:
+        """跑之前的魔数预检: 坏文件 + 好 `.bak` -> 回滚, 返回可用路径."""
+        if not self._fs.is_file(path):
+            return None
+        if looks_like_executable(path, self._windows):
+            return path
+        return self._recover_from_backup("魔数校验失败")
 
     def _runnable(self, path: str) -> bool:
         if not self._fs.is_file(path):
@@ -358,7 +413,11 @@ class RuntimeChannel:
         """
         recorded = self._record()
         native = recorded.get("binary", "")
-        reusable = _is_swift_payload(recorded.get("source", ""), recorded.get("channel", ""))
+        # 只在「**别人装的** Swift 原生安装」时 no-op(别在同一台机器上再存一份);
+        # 本通道自己的副本(channel=wrapper)要允许重装/升级,否则永远换不了新版本。
+        reusable = recorded.get("channel") != WRAPPER_CHANNEL and _is_swift_payload(
+            recorded.get("source", ""), recorded.get("channel", "")
+        )
         if native and reusable and self._runnable(native):
             self._reporter.info(f"复用已有的 Swift 安装: {native}")
             return self.status()
@@ -392,7 +451,7 @@ class RuntimeChannel:
                 raise RuntimeChannelError(f"{self._asset} 解出来的不是可执行文件", "E_VERIFY")
             if not self._windows:
                 os.chmod(staged, 0o755)
-            os.replace(staged, self.path)
+            self._replace_payload(staged)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
@@ -461,13 +520,29 @@ class RuntimeChannel:
         """
         target = binary or self.ensure()
         if os.name != "nt":
-            os.execv(target, [target, *argv])  # pragma: no cover - 进程被替换,after 不可达
+            try:
+                os.execv(target, [target, *argv])  # pragma: no cover - 进程被替换,after 不可达
+            except OSError as exc:
+                # 文件本身不可执行 (被截断 / 权限坏了 / 不是本机架构) -> 用 .bak 回滚后重试一次.
+                recovered = self._recover_from_backup(f"执行失败: {exc}")
+                if recovered is None:
+                    raise RuntimeChannelError(
+                        f"无法执行真身 {target}: {exc};可运行 `orzmc runtime install` 重装",
+                        "E_RUNTIME",
+                    ) from exc
+                os.execv(recovered, [recovered, *argv])  # pragma: no cover
         try:
             return subprocess.call([target, *argv])
         except KeyboardInterrupt:  # pragma: no cover - 交互中断
             return 130
         except OSError as exc:
-            raise RuntimeChannelError(f"无法执行 {target}: {exc}", "E_RUNTIME") from exc
+            recovered = self._recover_from_backup(f"执行失败: {exc}")
+            if recovered is None:
+                raise RuntimeChannelError(
+                    f"无法执行真身 {target}: {exc};可运行 `orzmc runtime install` 重装",
+                    "E_RUNTIME",
+                ) from exc
+            return subprocess.call([recovered, *argv])
 
 
 def _stderr_reporter() -> tuple[Reporter, ProgressSink]:
