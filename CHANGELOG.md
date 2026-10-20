@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.16.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.15.0...v2.16.0) (2026-10-20)
+
+
+### Features
+
+* **runtime:** 优先复用已有 Swift 原生安装（D-M3-3 混合方案）+ 库定位说明（D-M3-5） ([#86](https://github.com/OrzMC/OrzPythonMC/issues/86)) ([a4e65f4](https://github.com/OrzMC/OrzPythonMC/commit/a4e65f4be72b37a33341c2df74a711e40a6a115f))
+
+
+### Bug Fixes
+
+* **ci:** binary job 补检出父仓库（PyInstaller 资产的验收恢复真执行） ([#83](https://github.com/OrzMC/OrzPythonMC/issues/83)) ([0db8db4](https://github.com/OrzMC/OrzPythonMC/commit/0db8db44bb263073edf71bc7fb1ef1ad6a427c99))
+* **ci:** frozen 验收命令改成单行（Windows runner 的 pwsh 不认反斜杠续行） ([#85](https://github.com/OrzMC/OrzPythonMC/issues/85)) ([ccf0080](https://github.com/OrzMC/OrzPythonMC/commit/ccf0080780de64317ed40ae9a15926861cc80b0c))
+
 ## [2.15.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.14.0...v2.15.0) (2026-10-20)
 
 ### 🧩 升级须知（可选：把 `orzmc` 换成 Swift 真身运行，M3 预览）
