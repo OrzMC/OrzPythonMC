@@ -191,6 +191,20 @@ uv lock                            # 锁定依赖
 - **异常**:网络 / 文件错误在 service 层统一捕获并转 `RuntimeError`(中文消息),不裸抛 requests 异常。
 - **类型注解**:公共 API 全量注解;`from __future__ import annotations` 开头。
 
+## 开发环境注意(运行时通道, M3)
+
+规范 `docs/spec/install-update.md` §10.1 的「默认判定」: **没有 `install.conf` 的环境**(干净 runner、
+新 clone 的开发机、容器)默认走 **Swift 真身** —— 直接 `uv run orzmc ...` 会先下载 13–35MB。
+本地开发/CI 一律钉住 Python 实现:
+
+```bash
+ORZMC_RUNTIME=python uv run --all-packages orzmc --json capabilities
+```
+
+- `ci.yml` 已在**工作流级** `env` 钉住 `ORZMC_RUNTIME=python`(`release.yml` 复用同一工作流,自动继承);
+- 要验运行时通道的用例自己用 `env=` 覆盖(共享 harness 的 `contract/runtime-*`)。
+- 想真机验证转发: `XDG_STATE_HOME=/tmp/x ORZMC_RUNTIME=swift .venv/bin/orzmc --version`。
+
 ## 迭代流程(trunk-based + release-please)
 
 - **只有 `main` 是长期分支**(trunk),永远可发版;干活开短命分支(`feat/*`、`fix/*`、`docs/*`),用 PR 合入,**squash only**。`main` 有分支保护:必需检查 `quality` + `test (ubuntu-latest, x86_64)`,允许 admin 绕过(单人维护不被锁死)。
