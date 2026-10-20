@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.17.2](https://github.com/OrzMC/OrzPythonMC/compare/v2.17.1...v2.17.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* **runtime:** 默认一律 Python + 实验通道能解析 pre-release ([#93](https://github.com/OrzMC/OrzPythonMC/issues/93)) ([40282ec](https://github.com/OrzMC/OrzPythonMC/commit/40282ecb46f035711599471d893449ccde6e19ec))
+
 ## [2.17.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.17.0...v2.17.1) (2026-10-20)
 
 
