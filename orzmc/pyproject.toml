@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "orzmc"
 dynamic = ["version"]
-description = "OrzMC core library: bootstrap Minecraft client/server, manage a sandboxed Java runtime and multiple game versions"
+description = "OrzMC 能力库：Minecraft 客户端启动 / 服务端部署（产品主路径见 orzmc 命令行与 Swift 实现）"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

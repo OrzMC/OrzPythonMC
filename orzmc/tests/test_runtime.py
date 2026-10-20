@@ -183,6 +183,86 @@ class TestInstall:
         assert excinfo.value.code == "E_NETWORK"
 
 
+# ── 与原生安装共存 (§10.1) ───────────────────────────────────────────────────
+
+
+def _write_record(tmp_path, *, binary: str, source: str, version: str = "0.18.0") -> None:
+    state = tmp_path / "state" / "orzmc"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "install.conf").write_text(
+        "\n".join(
+            [
+                "tool=orzmc",
+                "schema=1",
+                f"version={version}",
+                "platform=linux-x86_64",
+                f"install_dir={os.path.dirname(binary)}",
+                f"binary={binary}",
+                f"source={source}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+class TestCoexistence:
+    def test_reuses_existing_native_install(self, tmp_path) -> None:
+        """已有原生 Swift 安装 -> 直接复用它, **不下载** (FakeHttp 没有种子, 一联网就炸)."""
+        native = tmp_path / "bin" / "orzmc"
+        native.parent.mkdir(parents=True)
+        native.write_bytes(SAFE_ELF)
+        native.chmod(0o755)
+        _write_record(tmp_path, binary=str(native), source="github:OrzMC/OrzMCKit")
+        channel = _channel(tmp_path, FakeHttp())
+
+        path, source = channel.resolve()
+        assert path == str(native)
+        assert "OrzMCKit" in source
+        assert channel.ensure() == str(native), "保留原生真身,不另存一份"
+
+        state = channel.status().to_dict()
+        assert state["reused"] is True
+        assert state["path"] == str(native)
+        assert state["version"] == "0.18.0"
+
+    def test_install_is_a_noop_when_native_install_exists(self, tmp_path) -> None:
+        native = tmp_path / "bin" / "orzmc"
+        native.parent.mkdir(parents=True)
+        native.write_bytes(SAFE_ELF)
+        native.chmod(0o755)
+        _write_record(tmp_path, binary=str(native), source="github:OrzMC/OrzMCKit")
+        http = FakeHttp()  # 任何联网都会失败
+        channel = _channel(tmp_path, http)
+
+        state = channel.install()
+
+        assert state.path == str(native)
+        assert http.requests == [], f"不该发任何请求:{http.requests}"
+        assert not (tmp_path / "state" / "orzmc" / "bin" / "orzmc").exists(), "不该多存一份副本"
+
+    def test_never_reuses_python_binary(self, tmp_path) -> None:
+        """`source` 指向 OrzPythonMC(Python 实现)时**不能**复用——那会自己转自己。"""
+        python_bin = tmp_path / "venv" / "orzmc"
+        python_bin.parent.mkdir(parents=True)
+        python_bin.write_bytes(SAFE_ELF)
+        python_bin.chmod(0o755)
+        _write_record(tmp_path, binary=str(python_bin), source="github:OrzMC/OrzPythonMC")
+        channel = _channel(tmp_path, FakeHttp())
+
+        path, _ = channel.resolve()
+        assert path != str(python_bin)
+        assert path.endswith(os.path.join("bin", "orzmc"))
+        assert channel.status().to_dict()["reused"] is False
+
+    def test_dangling_native_record_falls_back_to_own_copy(self, tmp_path) -> None:
+        _write_record(tmp_path, binary=str(tmp_path / "gone" / "orzmc"), source="github:OrzMC/OrzMCKit")
+        channel = _channel(tmp_path, FakeHttp())
+        path, _ = channel.resolve()
+        assert path == channel.path
+        assert channel.status().to_dict()["reused"] is False
+
+
 # ── 转发 ──────────────────────────────────────────────────────────────────────
 
 
