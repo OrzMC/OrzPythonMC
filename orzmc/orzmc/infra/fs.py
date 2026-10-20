@@ -26,9 +26,14 @@ def default_state_dir(
     ``docs/spec/state-paths.json`` 要求按平台求值, 而不是按宿主机. 默认值保持
     "读 ``os.environ`` + 当前平台" 的原行为.
     """
+    explicit = environ is not None
     env = os.environ if environ is None else environ
     windows = (os.name == "nt") if is_windows is None else is_windows
-    home = env.get("USERPROFILE" if windows else "HOME") or os.path.expanduser("~")
+    home = env.get("USERPROFILE" if windows else "HOME") or ""
+    if not home and not explicit:
+        # 只有「读进程环境」时才用 expanduser 兜底:显式注入的 environ 是权威,
+        # 否则测试/一致性套件会悄悄落到宿主机的真实主目录上(踩过)。
+        home = os.path.expanduser("~")
     if windows:
         base = env.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
     else:

@@ -1,0 +1,210 @@
+"""运行时分发(M3)单测:资产解析 / SHA256SUMS 校验 / 原子落盘 / 转发语义。
+
+规范:`docs/spec/install-update.md` §10.1。全程离线(FakeHttp),不碰真实网络。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import os
+import pathlib
+import zipfile
+
+import pytest
+from fakes import FakeHttp
+
+from orzmc.infra.fs import FileStore
+from orzmc.services.runtime import (
+    RUNTIME_ENV,
+    RuntimeChannel,
+    RuntimeChannelError,
+    looks_like_executable,
+    parse_sha256sums,
+    payload_asset,
+    runtime_mode,
+)
+
+SAFE_ELF = b"\x7fELF" + b"\x00" * 60
+HTML_ERROR = b"<!DOCTYPE html><html>404</html>"
+
+
+def _sums(name: str, payload: bytes) -> str:
+    return f"{hashlib.sha256(payload).hexdigest()}  {name}\n"
+
+
+def _channel(tmp_path, http: FakeHttp, *, asset: str = "orzmc-linux-x86_64", windows: bool = False) -> RuntimeChannel:
+    env = {
+        "HOME": str(tmp_path / "home"),
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+        # Windows 形态要 USERPROFILE / LOCALAPPDATA(显式 environ 是权威,不做宿主兜底)。
+        "USERPROFILE": str(tmp_path / "home"),
+        "LOCALAPPDATA": str(tmp_path / "state" / "local"),
+    }
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    return RuntimeChannel(
+        http=http,
+        fs=FileStore(),
+        environ=env,
+        system="windows" if windows else "linux",
+        machine="arm64" if windows else "x86_64",
+        is_windows=windows,
+    )
+
+
+# ── 纯函数 ────────────────────────────────────────────────────────────────────
+
+
+class TestRuntimeMode:
+    def test_default_is_python(self) -> None:
+        assert runtime_mode({}) == "python"
+        assert runtime_mode({RUNTIME_ENV: "python"}) == "python"
+
+    def test_swift_is_opt_in(self) -> None:
+        assert runtime_mode({RUNTIME_ENV: "swift"}) == "swift"
+        assert runtime_mode({RUNTIME_ENV: " SWIFT "}) == "swift"
+
+    def test_unknown_value_keeps_python(self) -> None:
+        assert runtime_mode({RUNTIME_ENV: "whatever"}) == "python"
+
+
+class TestPayloadAsset:
+    def test_posix(self) -> None:
+        assert payload_asset("Darwin", "arm64") == ("orzmc-macos-arm64", "macos-arm64")
+        assert payload_asset("Linux", "x86_64")[0] == "orzmc-linux-x86_64"
+
+    def test_windows_is_zip(self) -> None:
+        # Windows 资产是 zip(exe + 运行时 DLL),规范 §10.1。
+        assert payload_asset("Windows", "AMD64") == ("orzmc-windows-x86_64.zip", "windows-x86_64")
+
+    def test_unsupported_platform_has_error_code(self) -> None:
+        with pytest.raises(RuntimeChannelError) as excinfo:
+            payload_asset("Plan9", "mips")
+        assert excinfo.value.code == "E_UNSUPPORTED"
+
+
+class TestSumsAndMagic:
+    def test_parse_both_separators(self) -> None:
+        text = f"{'a' * 64}  orzmc-linux-x86_64\n{'b' * 64} *orzmc-windows-arm64.zip\n"
+        assert parse_sha256sums(text) == {
+            "orzmc-linux-x86_64": "a" * 64,
+            "orzmc-windows-arm64.zip": "b" * 64,
+        }
+
+    def test_magic_rejects_html(self, tmp_path) -> None:
+        page = tmp_path / "page"
+        page.write_bytes(HTML_ERROR)
+        assert not looks_like_executable(str(page), is_windows=False)
+
+        elf = tmp_path / "bin"
+        elf.write_bytes(SAFE_ELF)
+        assert looks_like_executable(str(elf), is_windows=False)
+
+        exe = tmp_path / "orzmc.exe"
+        exe.write_bytes(b"MZ" + b"\x00" * 60)
+        # PE 魔数只在 Windows 形态下接受。
+        assert looks_like_executable(str(exe), is_windows=True)
+        assert not looks_like_executable(str(exe), is_windows=False)
+
+
+# ── 安装 ──────────────────────────────────────────────────────────────────────
+
+
+class TestInstall:
+    def test_downloads_verifies_and_writes_record(self, tmp_path) -> None:
+        http = FakeHttp()
+        http.json_responses["/releases/latest"] = {"tag_name": "v0.18.0"}
+        http.text_responses["SHA256SUMS"] = _sums("orzmc-linux-x86_64", SAFE_ELF)
+        http.canned["orzmc-linux-x86_64"] = SAFE_ELF
+        channel = _channel(tmp_path, http)
+
+        state = channel.install()
+
+        assert state.installed is True
+        assert state.version == "0.18.0"
+        assert state.path.endswith(os.path.join("bin", "orzmc"))
+        with open(state.path, "rb") as handle:
+            assert handle.read() == SAFE_ELF
+        assert os.access(state.path, os.X_OK), "POSIX 上必须可执行"
+
+        record = (tmp_path / "state" / "orzmc" / "install.conf").read_text(encoding="utf-8")
+        assert "channel=wrapper" in record, "规范 §10.1:记录要标明这是 wrapper 通道"
+        assert f"binary={state.path}" in record
+        assert "source=github:OrzMC/OrzMCKit" in record
+
+    def test_checksum_mismatch_never_lands(self, tmp_path) -> None:
+        http = FakeHttp()
+        http.json_responses["/releases/latest"] = {"tag_name": "v0.18.0"}
+        http.text_responses["SHA256SUMS"] = _sums("orzmc-linux-x86_64", b"expected-bytes")
+        http.canned["orzmc-linux-x86_64"] = SAFE_ELF
+        channel = _channel(tmp_path, http)
+
+        with pytest.raises(RuntimeChannelError) as excinfo:
+            channel.install()
+
+        assert excinfo.value.code == "E_VERIFY"
+        assert not os.path.exists(channel.path), "校验失败不得落盘"
+
+    def test_missing_asset_reports_available_names(self, tmp_path) -> None:
+        http = FakeHttp()
+        http.json_responses["/releases/latest"] = {"tag_name": "v0.18.0"}
+        http.text_responses["SHA256SUMS"] = _sums("orzmc-linux-arm64", SAFE_ELF)
+        channel = _channel(tmp_path, http)
+
+        with pytest.raises(RuntimeChannelError) as excinfo:
+            channel.install()
+
+        assert excinfo.value.code == "E_NOT_FOUND"
+        assert "orzmc-linux-arm64" in str(excinfo.value)
+
+    def test_windows_zip_is_unpacked_with_runtime_dlls(self, tmp_path) -> None:
+        http = FakeHttp()
+        http.json_responses["/releases/latest"] = {"tag_name": "v0.18.0"}
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as bundle:
+            bundle.writestr("orzmc.exe", b"MZ" + b"\x00" * 60)
+            bundle.writestr("swiftCore.dll", b"DLL")
+        payload = buffer.getvalue()
+        http.text_responses["SHA256SUMS"] = _sums("orzmc-windows-arm64.zip", payload)
+        http.canned["orzmc-windows-arm64.zip"] = payload
+        channel = _channel(tmp_path, http, windows=True)
+
+        state = channel.install()
+
+        assert state.path.endswith("orzmc.exe")
+        # DLL 必须与 exe 同行(缺了会 STATUS_DLL_NOT_FOUND)。
+        assert (pathlib.Path(state.path).parent / "swiftCore.dll").is_file()
+
+    def test_offline_without_cached_payload_is_network_error(self, tmp_path) -> None:
+        http = FakeHttp()  # 没有任何种子 → 无 API、无 302
+        channel = _channel(tmp_path, http)
+        with pytest.raises(RuntimeChannelError) as excinfo:
+            channel.install()
+        assert excinfo.value.code == "E_NETWORK"
+
+
+# ── 转发 ──────────────────────────────────────────────────────────────────────
+
+
+class TestForward:
+    def test_ensure_reuses_installed_payload(self, tmp_path) -> None:
+        http = FakeHttp()
+        channel = _channel(tmp_path, http)
+        os.makedirs(os.path.dirname(channel.path), exist_ok=True)
+        with open(channel.path, "wb") as handle:
+            handle.write(SAFE_ELF)
+
+        # 已装就不该联网(FakeHttp 没有种子,一联网就抛)。
+        assert channel.ensure() == channel.path
+
+    def test_status_reports_wrapper_version_separately(self, tmp_path) -> None:
+        from orzmc.version import __version__
+
+        http = FakeHttp()
+        channel = _channel(tmp_path, http)
+        data = channel.status().to_dict()
+        assert data["enabled"] is False
+        assert data["installed"] is False
+        # 版本号语义:真身版本与 launcher 版本分开报(规范 §10.1)。
+        assert data["wrapper"] == __version__ == channel.status().to_dict()["wrapper"]
+        assert data["version"] == ""

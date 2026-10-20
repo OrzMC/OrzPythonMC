@@ -166,6 +166,9 @@ class InstallManifest:
     root_dir: str = DEFAULT_ROOT
     surface: str | None = None
     completion_file: str | None = None
+    #: 发行通道(规范 `install-update.md` §10.1): `wrapper` = PATH 上是 launcher,
+    #: 真身在状态目录; `None` = 传统单二进制安装. Swift 侧忽略未知键, 向后兼容.
+    channel: str | None = None
 
     # ── serialization ──────────────────────────────────────────────────────
 
@@ -189,6 +192,8 @@ class InstallManifest:
             lines.append(f"surface={self.surface}")
         if self.completion_file is not None:
             lines.append(f"completion_file={self.completion_file}")
+        if self.channel is not None:
+            lines.append(f"channel={self.channel}")
         return lines
 
     @classmethod
@@ -216,6 +221,7 @@ class InstallManifest:
             root_dir=fields.get("root_dir", DEFAULT_ROOT),
             surface=fields.get("surface"),
             completion_file=fields.get("completion_file"),
+            channel=fields.get("channel"),
         )
 
     # ── persistence ────────────────────────────────────────────────────────
