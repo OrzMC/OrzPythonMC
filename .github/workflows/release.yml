@@ -15,6 +15,13 @@ on:
         type: boolean
         default: false
 
+# 发布流水线里的断言会**直接执行刚构建出来的 orzmc**。规范 `install-update.md` §10.1 的
+# 「默认判定」让没有 install.conf 的干净 runner 默认走 Swift 真身 → 断言会去下载真身(还会因
+# 缺 Swift 运行时 127),从而报「二进制自报版本与 tag 不一致」。这里同 `ci.yml` 一样钉住 Python 实现;
+# 要验运行时通道的用例自己用 `env=` 覆盖(共享 harness / accept_selfupdate)。
+env:
+  ORZMC_RUNTIME: python
+
 # 权限与并发都按 tag/push 归一化,手动补发与 tag push 走同一条路。
 permissions:
   contents: write
