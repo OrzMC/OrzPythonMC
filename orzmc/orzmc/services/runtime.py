@@ -33,6 +33,7 @@ from orzmc.infra.transfer import download_with_progress
 
 REPO = "OrzMC/OrzMCKit"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
+API_RELEASES = f"https://api.github.com/repos/{REPO}/releases"
 DOWNLOAD_BASE = f"https://github.com/{REPO}/releases/download"
 
 #: 开关变量:未设置 / ``python`` 走 Python 实现;``swift`` 走 shim 转发真身。
@@ -97,14 +98,15 @@ def resolve_runtime(
     *,
     is_windows: bool | None = None,
 ) -> tuple[str, str]:
-    """返回 ``(运行时, 判定依据)`` -- 规范 `install-update.md` §10.1「默认判定」。
+    """返回 ``(运行时, 判定依据)`` -- 规范 `install-update.md` §10.1。
 
-    显式 ``ORZMC_RUNTIME`` 永远优先(``python`` 是逃生阀);未设置时按安装记录判:
+    **Python 是实现主体**: 未显式开启时**一律** ``python``(不会因为"没装过"就去下载 Swift)。
 
-    1. 没有 ``install.conf`` -> ``swift``(``pip install`` 新装, 直接给唯一实现);
-    2. ``channel=wrapper`` -> ``swift``(用户主动装过真身);
-    3. ``source`` 指向 OrzMCKit -> ``swift``(原生 Swift 安装);
-    4. 其余 -> ``python``(存量安装器/二进制用户, 不因升级被悄悄换实现).
+    1. ``ORZMC_RUNTIME=swift`` -> ``swift``(实验开关, 仅显式设置才生效);
+    2. ``ORZMC_RUNTIME=python`` -> ``python``(显式钉住, 与 1 等价于"没开");
+    3. 未设置 + ``channel=wrapper`` -> ``swift``(用户自己跑过 ``runtime install``, 尊重已有选择);
+    4. 未设置 + ``source`` 指向 OrzMCKit -> ``swift``(用户自己装了 Swift 原生版, 复用它);
+    5. 其余(含**全新安装**) -> ``python``.
     """
     env = os.environ if environ is None else environ
     explicit = (env.get(RUNTIME_ENV) or "").strip().lower()
@@ -113,13 +115,11 @@ def resolve_runtime(
     if explicit == "python":
         return "python", "env:python"
     record = _read_record(environ=env, is_windows=is_windows)
-    if not record:
-        return "swift", "fresh-install"
     if record.get("channel") == WRAPPER_CHANNEL:
         return "swift", "record:wrapper"
     if any(marker in record.get("source", "") for marker in _SWIFT_SOURCES):
         return "swift", "record:native"
-    return "python", "record:legacy"
+    return "python", "default"
 
 
 def payload_asset(system: str | None = None, machine: str | None = None) -> tuple[str, str]:
@@ -322,6 +322,20 @@ class RuntimeChannel:
     # ── 安装 ────────────────────────────────────────────────────────────────
 
     def _latest_tag(self) -> str:
+        """实验通道:Swift 的 Release **一律是 pre-release**,`/releases/latest` 不会指向它们,
+        所以优先**列出** Release(新→旧,跳过 draft 与不带资产的),再退回 `/releases/latest` 与 302。
+        """
+        try:
+            listed = self._http.get_json(f"{API_RELEASES}?per_page=10")
+            entries = listed if isinstance(listed, list) else []
+            for entry in entries:
+                if not isinstance(entry, dict) or entry.get("draft"):
+                    continue
+                tag = str(entry.get("tag_name") or "")
+                if tag:
+                    return _normalize_tag(tag)
+        except Exception:
+            self._reporter.debug("列 Release 失败,退回 /releases/latest")
         try:
             payload = self._http.get_json(API_LATEST)
             tag = str(payload.get("tag_name") or "")
