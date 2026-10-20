@@ -36,16 +36,16 @@ def _forwarded_argv(argv: list[str]) -> list[str] | None:
 
     规则很简单:
 
-    - 没开开关 -> 不转发(默认,存量行为不变);
+    - 判定结果是 ``python`` -> 不转发(规范 §10.1「默认判定」:存量安装保持 Python);
 
     - `runtime` 的管理命令 -> 留在 Python 侧(台账里 python lead / swift na);
 
     - **其余一律转发**,包括 `--version` / `--help` / 裸 `orzmc`:
       规范 `install-update.md` §10.1 要求版本号报**真身**版本,帮助也应是真身的命令面。
     """
-    from orzmc.services.runtime import runtime_mode
+    from orzmc.services.runtime import resolve_runtime
 
-    if runtime_mode() != "swift":
+    if resolve_runtime()[0] != "swift":
         return None
     index = 0
     while index < len(argv):

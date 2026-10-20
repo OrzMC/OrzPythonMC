@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -60,11 +61,65 @@ class RuntimeChannelError(RuntimeError):
         self.code = code
 
 
+def _read_record(
+    environ: Mapping[str, str] | None = None,
+    is_windows: bool | None = None,
+) -> dict[str, str]:
+    """读状态目录的 ``install.conf``(不存在则返回空 dict)。"""
+    from orzmc.services.selfinstall import MANIFEST_FILENAME
+
+    path = os.path.join(default_state_dir(environ=environ, is_windows=is_windows), MANIFEST_FILENAME)
+    try:
+        with open(path, encoding="utf-8-sig") as handle:
+            text = handle.read()
+    except OSError:
+        return {}
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            fields[key.strip()] = value
+    return fields
+
+
 def runtime_mode(environ: dict[str, str] | None = None) -> str:
-    """``swift`` 表示走转发通道;其余一律按 Python 实现跑(当前默认)。"""
+    """**只看显式开关**:``swift`` / 其余按 ``python``。
+
+    默认判定要读 ``install.conf``,走 :func:`resolve_runtime`。
+    """
     env = os.environ if environ is None else environ
     value = (env.get(RUNTIME_ENV) or "").strip().lower()
     return "swift" if value == "swift" else "python"
+
+
+def resolve_runtime(
+    environ: Mapping[str, str] | None = None,
+    *,
+    is_windows: bool | None = None,
+) -> tuple[str, str]:
+    """返回 ``(运行时, 判定依据)`` -- 规范 `install-update.md` §10.1「默认判定」。
+
+    显式 ``ORZMC_RUNTIME`` 永远优先(``python`` 是逃生阀);未设置时按安装记录判:
+
+    1. 没有 ``install.conf`` -> ``swift``(``pip install`` 新装, 直接给唯一实现);
+    2. ``channel=wrapper`` -> ``swift``(用户主动装过真身);
+    3. ``source`` 指向 OrzMCKit -> ``swift``(原生 Swift 安装);
+    4. 其余 -> ``python``(存量安装器/二进制用户, 不因升级被悄悄换实现).
+    """
+    env = os.environ if environ is None else environ
+    explicit = (env.get(RUNTIME_ENV) or "").strip().lower()
+    if explicit == "swift":
+        return "swift", "env:swift"
+    if explicit == "python":
+        return "python", "env:python"
+    record = _read_record(environ=env, is_windows=is_windows)
+    if not record:
+        return "swift", "fresh-install"
+    if record.get("channel") == WRAPPER_CHANNEL:
+        return "swift", "record:wrapper"
+    if any(marker in record.get("source", "") for marker in _SWIFT_SOURCES):
+        return "swift", "record:native"
+    return "python", "record:legacy"
 
 
 def payload_asset(system: str | None = None, machine: str | None = None) -> tuple[str, str]:
@@ -215,17 +270,7 @@ class RuntimeChannel:
         return self._asset
 
     def _record(self) -> dict[str, str]:
-        from orzmc.services.selfinstall import MANIFEST_FILENAME
-
-        record = os.path.join(default_state_dir(environ=self._env, is_windows=self._windows), MANIFEST_FILENAME)
-        if not self._fs.exists(record):
-            return {}
-        fields: dict[str, str] = {}
-        for line in self._fs.read_text(record).splitlines():
-            key, sep, value = line.partition("=")
-            if sep:
-                fields[key.strip()] = value
-        return fields
+        return _read_record(environ=self._env, is_windows=self._windows)
 
     def resolve(self) -> tuple[str, str]:
         """返回**要执行的真身** ``(path, source)``。
@@ -265,7 +310,7 @@ class RuntimeChannel:
         installed = self._fs.is_file(path)
         version = record.get("version", "") if installed and recorded == path else ""
         return RuntimeStatus(
-            enabled=runtime_mode(self._env) == "swift",
+            enabled=resolve_runtime(self._env, is_windows=self._windows)[0] == "swift",
             installed=installed,
             version=version,
             path=path,
@@ -446,5 +491,6 @@ __all__ = [
     "payload_asset",
     "payload_dir",
     "payload_path",
+    "resolve_runtime",
     "runtime_mode",
 ]

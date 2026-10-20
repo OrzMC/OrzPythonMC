@@ -7,11 +7,33 @@
 跨平台 Minecraft **客户端启动 / 服务端部署**工具,一条命令即可安装与启动。多版本并存、Java 运行时自动托管(不依赖系统 Java),发布为 PyPI 包与各平台独立二进制。
 
 > **两个包的分工(M3)**:
-> - **`orzmc-app`** —— 命令行程序(`orzmc`)。**产品主路径**:PyPI 上是发行通道,可用
->   `ORZMC_RUNTIME=swift` 把命令转发给 [Swift 实现](https://github.com/OrzMC/OrzMCKit)(单一实现);
+> - **`orzmc-app`** —— 命令行程序(`orzmc`)。**产品主路径**
 > - **`orzmc`**(本仓库同名的库) —— **供 Python 程序调用的能力库**(服务端部署 / 客户端启动 / 备份 / 插件 …),
 >   供脚本与自动化使用。它**不是**产品主路径,新功能优先落在 Swift 实现,**不再承诺 API 稳定扩张**
 >   (破坏性变更会走 minor + CHANGELOG 说明)。
+
+### 运行时通道（`ORZMC_RUNTIME`）
+
+`orzmc` 命令的**功能实现**是 [Swift 版](https://github.com/OrzMC/OrzMCKit);PyPI 包负责装/升级它并转发。
+
+| 情况 | 默认行为 |
+|---|---|
+| **新装**（`pip install orzmc-app`，没有安装记录） | 默认走 **Swift 真身**（首次运行自动下载 13–35 MB，SHA256 校验） |
+| **一键安装器装的**（`install.sh` / `install.ps1`，含**新装**；有 `install.conf`） | 默认仍走 **Python 实现**（安装器目前装的就是 PyInstaller 二进制，再下 Swift 真身等于白下两遍；见下） |
+| `ORZMC_RUNTIME=swift` | 强制走 Swift 真身 |
+| `ORZMC_RUNTIME=python` | 强制走 Python 实现（**逃生阀**，永久有效） |
+
+```sh
+orzmc runtime status     # 看当前用哪套、真身版本、是否复用了已有原生安装
+orzmc runtime install    # 预下载真身（已有原生 Swift 安装时是 no-op）
+```
+
+> **Python 引擎的维护窗口**：自 `2.17.0` 起 **6 个月**内（至 2027-04-20），Python 实现只修
+> **安全 / 数据损坏 / 无法启动** 三类问题，不再开发新功能；到期后归档，运行时通道的「存量安装」
+> 豁免也会一并移除。想提前用上单一实现：`export ORZMC_RUNTIME=swift`。
+>
+> **下一步（已排期）**：把一键安装器改成直接安装 Swift 二进制（而不是 PyInstaller 二进制），
+> 之后新装一律是单一实现，并可下线 PyInstaller 的 6 平台资产（省一半发布矩阵）。
 
 ## 核心特性
 
