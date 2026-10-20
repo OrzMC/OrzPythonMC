@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.17.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.16.0...v2.17.0) (2026-10-20)
+
+
+### Features
+
+* **runtime:** 新装默认走 Swift 真身（D-M3-1）+ 六个月维护窗口（D-M3-2） ([#87](https://github.com/OrzMC/OrzPythonMC/issues/87)) ([201de0c](https://github.com/OrzMC/OrzPythonMC/commit/201de0caa8cbe0c5156364b16951b2871e4c0847))
+
 ## [2.16.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.15.0...v2.16.0) (2026-10-20)
 
 
