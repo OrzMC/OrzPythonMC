@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.17.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.17.0...v2.17.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **release:** 发布流水线也钉住 ORZMC_RUNTIME=python（断言步骤会直接跑二进制） ([#90](https://github.com/OrzMC/OrzPythonMC/issues/90)) ([91f234b](https://github.com/OrzMC/OrzPythonMC/commit/91f234bae9391ba94e980f359c46899f84bb1c7f))
+
 ## [2.17.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.16.0...v2.17.0) (2026-10-20)
 
 ### ⚠️ 升级须知（默认实现变了：新装走 Swift 真身；Python 引擎进入 6 个月维护窗口）
