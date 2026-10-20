@@ -254,6 +254,15 @@ jobs:
       # 模块,PyInstaller 静态分析看不到 → 冻结点缺 `shellingham.posix`/`nt` →
       # RuntimeError。`scripts/build.py` 已 `--collect-submodules shellingham`,
       # 这里在「真的二进制」上把补全 / 信封 / MCP / 取消语义全跑一遍兜住回归。
+      # 验收脚本只有一份，在父仓库（`docs/two-cli-strategy.md` M2）。**必须**先检出：
+      # 少了这一步 `parent/scripts/accept/cli.py` 不存在，frozen 验收直接报 404 ——
+      # 2026-10-20 抓到：main push 上的 `binary` job 一直这样红，等于 PyInstaller 资产从未被验收。
+      - name: Checkout parent (acceptance harness + spec)
+        uses: actions/checkout@v7
+        with:
+          repository: OrzMC/OrzMC
+          path: parent
+
       - name: CLI acceptance (frozen binary)
         # 冻结二进制专属用例（PyInstaller 通路）用 `--frozen` 打开。
         run: |
