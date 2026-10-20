@@ -41,6 +41,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# CI 验的是 **Python 实现**本身（ruff/mypy/pytest/命令面/一致性/冻结二进制）。
+# 规范 `install-update.md` §10.1 的「默认判定」会让**没有 install.conf 的环境**（正是干净 runner）
+# 默认走 Swift 真身：首次会去下载 13–35MB 然后在没有 Swift 运行时的 runner 上 exec 失败（127）。
+# 所以整条工作流钉住 `python`；要验运行时通道的用例自己用 `env=` 覆盖（见共享 harness）。
+env:
+  ORZMC_RUNTIME: python
+
 jobs:
   # PR 标题就是 squash 提交的标题,而 release-please 用 conventional-commits 解析它。
   # 实测:标题里出现**带空格的括号**(如 `(PyPI provenance)`)会让解析器整条放弃

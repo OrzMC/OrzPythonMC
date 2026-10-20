@@ -22,6 +22,7 @@ from orzmc.services.runtime import (
     looks_like_executable,
     parse_sha256sums,
     payload_asset,
+    resolve_runtime,
     runtime_mode,
 )
 
@@ -56,16 +57,49 @@ def _channel(tmp_path, http: FakeHttp, *, asset: str = "orzmc-linux-x86_64", win
 
 
 class TestRuntimeMode:
-    def test_default_is_python(self) -> None:
+    def test_explicit_python(self) -> None:
         assert runtime_mode({}) == "python"
         assert runtime_mode({RUNTIME_ENV: "python"}) == "python"
 
-    def test_swift_is_opt_in(self) -> None:
+    def test_explicit_swift(self) -> None:
         assert runtime_mode({RUNTIME_ENV: "swift"}) == "swift"
         assert runtime_mode({RUNTIME_ENV: " SWIFT "}) == "swift"
 
     def test_unknown_value_keeps_python(self) -> None:
         assert runtime_mode({RUNTIME_ENV: "whatever"}) == "python"
+
+
+class TestResolveRuntime:
+    """规范 §10.1「默认判定」: 新装给 swift, 存量安装保持 python."""
+
+    def _env(self, tmp_path) -> dict[str, str]:
+        return {"HOME": str(tmp_path), "XDG_STATE_HOME": str(tmp_path / "state")}
+
+    def _record(self, tmp_path, body: str) -> None:
+        state = tmp_path / "state" / "orzmc"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "install.conf").write_text(body, encoding="utf-8")
+
+    def test_fresh_install_defaults_to_swift(self, tmp_path) -> None:
+        assert resolve_runtime(self._env(tmp_path)) == ("swift", "fresh-install")
+
+    def test_legacy_installer_user_stays_python(self, tmp_path) -> None:
+        self._record(tmp_path, "tool=orzmc\nversion=2.16.0\nbinary=/x/orzmc\nsource=github:OrzMC/OrzPythonMC\n")
+        assert resolve_runtime(self._env(tmp_path)) == ("python", "record:legacy")
+
+    def test_native_swift_install_uses_swift(self, tmp_path) -> None:
+        self._record(tmp_path, "tool=orzmc\nversion=0.18.0\nbinary=/x/orzmc\nsource=github:OrzMC/OrzMCKit\n")
+        assert resolve_runtime(self._env(tmp_path)) == ("swift", "record:native")
+
+    def test_wrapper_channel_uses_swift(self, tmp_path) -> None:
+        self._record(tmp_path, "tool=orzmc\nversion=0.18.0\nbinary=/x/orzmc\nchannel=wrapper\n")
+        assert resolve_runtime(self._env(tmp_path)) == ("swift", "record:wrapper")
+
+    def test_env_always_wins(self, tmp_path) -> None:
+        self._record(tmp_path, "tool=orzmc\nversion=0.18.0\nbinary=/x/orzmc\nchannel=wrapper\n")
+        env = self._env(tmp_path)
+        assert resolve_runtime({**env, RUNTIME_ENV: "python"}) == ("python", "env:python")
+        assert resolve_runtime({RUNTIME_ENV: "swift"}) == ("swift", "env:swift")
 
 
 class TestPayloadAsset:
@@ -283,7 +317,8 @@ class TestForward:
         http = FakeHttp()
         channel = _channel(tmp_path, http)
         data = channel.status().to_dict()
-        assert data["enabled"] is False
+        # 没有 install.conf = pip 新装 → 默认判定为 swift(规范 §10.1)。
+        assert data["enabled"] is True
         assert data["installed"] is False
         # 版本号语义:真身版本与 launcher 版本分开报(规范 §10.1)。
         assert data["wrapper"] == __version__ == channel.status().to_dict()["wrapper"]

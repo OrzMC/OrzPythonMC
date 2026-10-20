@@ -250,6 +250,9 @@ class Sandbox:
             "LOCALAPPDATA": str(self.state_base),
             "ORZMC_NO_RC": "1",
             "ORZMC_ROOT_DIR": str(self.game_root),
+            # 钉住 Python 实现:规范 §10.1 的「默认判定」会让无 install.conf 的沙箱默认走 swift
+            # (首次要下载真身)。本脚本验的是安装器/自升级,不该被运行时通道干扰。
+            "ORZMC_RUNTIME": "python",
         }
 
     def env_oneline(self) -> dict[str, str]:
