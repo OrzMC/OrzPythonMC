@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.14.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.13.0...v2.14.0) (2026-10-20)
+
+
+### Features
+
+* **conformance:** 上报 state.paths（default_state_dir 可注入 + 适配器操作） ([#78](https://github.com/OrzMC/OrzPythonMC/issues/78)) ([4a9f082](https://github.com/OrzMC/OrzPythonMC/commit/4a9f0823265d9daa2591dffd2ae3852d17c60157))
+
+
+### Bug Fixes
+
+* **app:** 非 macOS 上一律 E_UNSUPPORTED（原来是 E_RUNTIME） ([#77](https://github.com/OrzMC/OrzPythonMC/issues/77)) ([4687d8e](https://github.com/OrzMC/OrzPythonMC/commit/4687d8e563f0484d888bcf36993d220094f21edc))
+
 ## [2.13.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.12.0...v2.13.0) (2026-10-19)
 
 
