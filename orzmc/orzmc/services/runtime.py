@@ -98,6 +98,20 @@ def payload_path(
     return os.path.join(payload_dir(environ=environ, is_windows=is_windows), PAYLOAD_NAME + (".exe" if windows else ""))
 
 
+#: 哪些 ``source`` 值代表"Swift 真身"(可安全复用)。
+_SWIFT_SOURCES = ("OrzMCKit",)
+
+
+def _is_swift_payload(source: str, channel: str) -> bool:
+    """``source`` 指向 OrzMCKit(或本通道自己的 wrapper 记录)才算真身。
+
+    排除 ``OrzMC/OrzPythonMC``:那是 Python 实现,复用它会变成"自己转自己"。
+    """
+    if channel == WRAPPER_CHANNEL:
+        return True
+    return any(marker in source for marker in _SWIFT_SOURCES)
+
+
 @dataclass
 class RuntimeStatus:
     """``orzmc runtime status`` 的数据形状。"""
@@ -108,6 +122,8 @@ class RuntimeStatus:
     path: str
     source: str
     asset: str
+    #: 是否**复用**了已有的 Swift 原生安装(而不是本通道自己的副本)。
+    reused: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -118,6 +134,8 @@ class RuntimeStatus:
             "source": self.source,
             "asset": self.asset,
             # launcher 自身版本(规范 §10.1:版本号语义与真身分开)。
+            # 是否复用了已有的原生 Swift 安装(§10.1 共存规则)。
+            "reused": self.reused,
             "wrapper": _wrapper_version(),
         }
 
@@ -209,20 +227,51 @@ class RuntimeChannel:
                 fields[key.strip()] = value
         return fields
 
+    def resolve(self) -> tuple[str, str]:
+        """返回**要执行的真身** ``(path, source)``。
+
+        优先级(规范 `install-update.md` §10.1「与原生安装共存」):
+
+        1. `install.conf` 记录的真身 —— 若是 Swift 原生安装(``source`` 指向 OrzMCKit)
+           且文件真的可执行,就**复用它**,不再下载第二份;
+        2. 否则用本通道自己的副本 ``<stateDir>/bin/orzmc``(不存在则装上)。
+
+        **绝不复用 Python 的二进制**:那会转发给 Python 实现,变成自己转自己。
+        """
+        record = self._record()
+        recorded = record.get("binary", "")
+        source = record.get("source", "")
+        if recorded and _is_swift_payload(source, record.get("channel", "")) and self._runnable(recorded):
+            return recorded, source
+        own = self.path
+        if self._fs.is_file(own):
+            return own, (source if recorded == own else f"github:{REPO}")
+        return own, f"github:{REPO}"
+
+    def _runnable(self, path: str) -> bool:
+        if not self._fs.is_file(path):
+            return False
+        if self._windows:
+            return True
+        return os.access(path, os.X_OK)
+
     def status(self) -> RuntimeStatus:
         record = self._record()
-        path = self.path
+        own = self.path
+        recorded = record.get("binary", "")
+        source = record.get("source", "")
+        shared = bool(recorded) and _is_swift_payload(source, record.get("channel", "")) and self._runnable(recorded)
+        path = recorded if shared else own
         installed = self._fs.is_file(path)
-        version = ""
-        if installed and record.get("binary") == path:
-            version = record.get("version", "")
+        version = record.get("version", "") if installed and recorded == path else ""
         return RuntimeStatus(
             enabled=runtime_mode(self._env) == "swift",
             installed=installed,
             version=version,
             path=path,
-            source=record.get("source", "") if installed else "",
+            source=(source if installed else ""),
             asset=self._asset,
+            reused=shared,
         )
 
     # ── 安装 ────────────────────────────────────────────────────────────────
@@ -242,7 +291,19 @@ class RuntimeChannel:
         raise RuntimeChannelError("无法确定最新版本(网络不可用或受限)", "E_NETWORK")
 
     def install(self, version: str | None = None) -> RuntimeStatus:
-        """下载 + 校验 + 原子落盘;返回安装后的状态。"""
+        """下载 + 校验 + 原子落盘;返回安装后的状态。
+
+        已有**可复用的原生 Swift 安装**时直接返回它(不下载、不覆盖记录):
+        同一台机器上只该有一份真身,重复下载既浪费也会让 `install.conf` 漂移。
+        要强制换成自管副本,先删记录(或走原生安装器的 `update`)。
+        """
+        recorded = self._record()
+        native = recorded.get("binary", "")
+        reusable = _is_swift_payload(recorded.get("source", ""), recorded.get("channel", ""))
+        if native and reusable and self._runnable(native):
+            self._reporter.info(f"复用已有的 Swift 安装: {native}")
+            return self.status()
+
         tag = _normalize_tag(version) if version else self._latest_tag()
         base = f"{DOWNLOAD_BASE}/{tag}"
         try:
@@ -319,9 +380,10 @@ class RuntimeChannel:
     # ── 转发 ────────────────────────────────────────────────────────────────
 
     def ensure(self, version: str | None = None) -> str:
-        """有真身就直接用;没有则装一次(装不了就按规范报错)。"""
-        if self._fs.is_file(self.path):
-            return self.path
+        """有可用真身就直接用;没有则装一次(装不了就按规范报错)。"""
+        path, _ = self.resolve()
+        if self._fs.is_file(path):
+            return path
         try:
             return self.install(version).path
         except RuntimeChannelError:
