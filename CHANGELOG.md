@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.14.0...v2.15.0) (2026-10-20)
+
+
+### Features
+
+* **runtime:** M3 运行时分发 shim——装/升级 Swift 真身并转发命令 ([#80](https://github.com/OrzMC/OrzPythonMC/issues/80)) ([52a7d3c](https://github.com/OrzMC/OrzPythonMC/commit/52a7d3c0d19427da4b1dc258741bae1b12c0787d))
+
 ## [2.14.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.13.0...v2.14.0) (2026-10-20)
 
 
