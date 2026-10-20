@@ -2,6 +2,17 @@
 
 ## [2.15.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.14.0...v2.15.0) (2026-10-20)
 
+### 🧩 升级须知（可选：把 `orzmc` 换成 Swift 真身运行，M3 预览）
+
+`2.15.0` 起 PyPI 的 `orzmc` 也能当**发行通道**：功能交给 Swift 实现，Python 只负责装/升级并转发。
+**默认没变**（不设变量就还是原来的 Python 实现）。
+
+- 试用：`export ORZMC_RUNTIME=swift`（PowerShell：`$env:ORZMC_RUNTIME="swift"`），
+  首次运行自动下载真身（~13–35MB，SHA256 校验）到状态目录 `bin/`；
+- 开启后 `orzmc --version` 报**真身**版本（如 `orzmc 0.18.0`），不是 PyPI 包版本；
+- 预取 / 看状态：`orzmc runtime install` / `orzmc runtime status`；
+- 回退：`unset ORZMC_RUNTIME`；断网且无本地真身 → `E_NETWORK`（不静默失败）。
+
 
 ### Features
 
