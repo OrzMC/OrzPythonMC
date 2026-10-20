@@ -2,6 +2,16 @@
 
 ## [2.17.2](https://github.com/OrzMC/OrzPythonMC/compare/v2.17.1...v2.17.2) (2026-10-20)
 
+### ⚠️ 升级须知（`2.15–2.17` 的「默认走 Swift」实验已结束，本版回退）
+
+`2.15.0`–`2.17.1` 期间，`pip install orzmc-app` 的**全新安装**默认会下载 Swift 实现并转发命令。
+该实验已结束：**Python 实现是唯一对外分发的实现**；Swift 实现只作为与 Python 同步迭代的内部实验
+（Release 标 pre-release、不对外宣传）。
+
+- 默认行为：**Python 实现**——全新安装不再下载任何东西，也不创建状态目录；
+- `ORZMC_RUNTIME=swift` 保留为实验开关（仅显式开启）；
+- 已被切到 Swift 的实现（`--version` 显示 `0.19.x`）→ `export ORZMC_RUNTIME=python` 或重装即可回 Python。
+
 
 ### Bug Fixes
 
