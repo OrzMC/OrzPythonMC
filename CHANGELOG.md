@@ -2,6 +2,24 @@
 
 ## [2.17.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.16.0...v2.17.0) (2026-10-20)
 
+### ⚠️ 升级须知（默认实现变了：新装走 Swift 真身；Python 引擎进入 6 个月维护窗口）
+
+**不需要你做任何事**，但「新装」第一次运行会有变化：
+
+| 你的情况 | `orzmc` 会怎么做 |
+|---|---|
+| **`pip install orzmc-app` 新装**（无 `install.conf`） | 默认走 **Swift 实现**；**首次运行下载 13–35 MB**（SHA256 校验，存到状态目录 `bin/`） |
+| 用 `install.sh` / `install.ps1` 装的（含新装） | **行为不变**（该通道装的是 PyInstaller 二进制，默认仍走 Python） |
+| 设过 `ORZMC_RUNTIME` | 按你设的执行 |
+
+**逃生阀（永久有效）**：`ORZMC_RUNTIME=python` 钉住 Python 实现；`ORZMC_RUNTIME=swift` 强制走真身。
+`orzmc runtime status` 看当前用的是哪套；`orzmc runtime install` 预下载（已有原生安装时 no-op）。
+
+**维护窗口**：自 `2.17.0` 起 6 个月（至 2027-04-20），Python 实现只修**安全 / 数据损坏 / 无法启动**，
+不再开发新功能；到期归档并移除「安装器装的仍走 Python」豁免。
+
+**已知影响**：新装首次运行需下载；无网络且无本地真身 → `E_NETWORK`（不静默失败），可回退 python。
+
 
 ### Features
 
