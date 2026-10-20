@@ -31,8 +31,65 @@ def _force_utf8_stdio() -> None:
     _reconfigure_utf8(sys.stderr)
 
 
+def _forwarded_argv(argv: list[str]) -> list[str] | None:
+    """`ORZMC_RUNTIME=swift` 时该转发给真身的 argv;不该转发则返回 ``None``。
+
+    规则很简单:
+
+    - 没开开关 -> 不转发(默认,存量行为不变);
+
+    - `runtime` 的管理命令 -> 留在 Python 侧(台账里 python lead / swift na);
+
+    - **其余一律转发**,包括 `--version` / `--help` / 裸 `orzmc`:
+      规范 `install-update.md` §10.1 要求版本号报**真身**版本,帮助也应是真身的命令面。
+    """
+    from orzmc.services.runtime import runtime_mode
+
+    if runtime_mode() != "swift":
+        return None
+    index = 0
+    while index < len(argv):
+        item = argv[index]
+        if item in ("--root-dir", "--min-mem", "--max-mem"):
+            index += 2  # 跳过它的值(值可能恰好叫 runtime)
+            continue
+        if item == "runtime":
+            return None
+        if not item.startswith("-"):
+            break
+        index += 1
+    return argv
+
+
+def _forward(argv: list[str]) -> int:
+    """把 argv 原样交给 Swift 真身;通道错误按规范错误码呈现。"""
+    import json
+
+    from orzmc.services.runtime import RuntimeChannelError, forward_or_report
+
+    try:
+        return forward_or_report(argv)
+    except RuntimeChannelError as exc:
+        if "--json" in argv:
+            positional = [item for item in argv if not item.startswith("-")]
+            payload = {
+                "ok": False,
+                # 真身没跑起来,command 只能按 argv 推断(第一个位置参数)。
+                "command": positional[0] if positional else "",
+                "data": None,
+                "error": {"code": exc.code, "message": str(exc)},
+            }
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"错误: {exc}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     _force_utf8_stdio()
+    forwarded = _forwarded_argv(sys.argv[1:])
+    if forwarded is not None:
+        return _forward(forwarded)
     try:
         app()
         return 0

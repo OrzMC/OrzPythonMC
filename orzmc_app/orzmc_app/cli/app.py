@@ -700,6 +700,43 @@ def app_command(
     _fail(f"未知操作: {action}(可选 install|open|uninstall|status)")
 
 
+@app.command("runtime")
+def runtime_command(
+    ctx: typer.Context,
+    action: Annotated[str, typer.Argument(help="status|install")],
+    version: Annotated[str | None, typer.Option("--version", "-v", help="指定真身版本(tag)")] = None,
+    yes: Yes = False,
+) -> None:
+    """运行时分发(M3):安装 / 查看 Swift 真身;`ORZMC_RUNTIME=swift` 时所有命令转发给它。"""
+    _begin("runtime", ctx)
+    from orzmc.services.runtime import RuntimeChannel, RuntimeChannelError
+
+    channel = RuntimeChannel(reporter=_reporter(ctx), sink=_progress())
+    action = action.lower()
+    if action == "status":
+        state = channel.status()
+        _emit(state.to_dict())
+        if not _json_mode():
+            if state.installed:
+                _console.print(f"[success]真身已就绪:[/success] {state.path} ({state.version or '?'})")
+            else:
+                _console.print("真身未安装;`orzmc runtime install` 或设 `ORZMC_RUNTIME=swift` 后首次运行会自动装")
+            _console.print(f"转发: {'开' if state.enabled else '关'}(ORZMC_RUNTIME)")
+        return
+    if action == "install":
+        if not yes and is_interactive() and not Confirm.ask(f"下载 Swift 真身到 {channel.path}?", default=True):
+            _fail("已取消安装", code="E_CANCELLED")
+        try:
+            state = channel.install(version)
+        except RuntimeChannelError as exc:
+            _fail(str(exc), code=exc.code)
+        _emit(state.to_dict())
+        if not _json_mode():
+            _console.print(f"[success]已安装:[/success] {state.path} ({state.version})")
+        return
+    _fail(f"未知操作: {action}(可选 status|install)")
+
+
 @app.command()
 def version(ctx: typer.Context) -> None:
     """打印工具版本。"""
