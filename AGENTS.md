@@ -53,7 +53,7 @@ python/                         # uv workspace 根
   .github/workflows/{ci,acceptance,release,release-please,pages}.yml
   .github/{dependabot.yml,PULL_REQUEST_TEMPLATE.md}  release-please-config.json
   .release-please-manifest.json  CHANGELOG.md(机器人维护)  CONTRIBUTING.md
-  scripts/{build,acceptance,accept_selfupdate,accept_cli}.py
+  scripts/{build,acceptance,accept_selfupdate}.py   # 验收 CLI 已迁到父仓库 `scripts/accept/cli.py`（一份给两套实现）
   docs/index.html                # 官网(静态单页,GitHub Pages 托管;最新版 tag 部署期注入)
   docs/install.sh  install.ps1   # 一键安装器(Unix sh / Windows PowerShell)
   docs/installer-design.md       # 安装器方案设计(历史评审稿,参考)
@@ -151,15 +151,15 @@ uv publish                         # 发布到 PyPI
 uv run --package orzmc-app python scripts/build.py   # PyInstaller 单文件二进制 → dist/
 uv run python scripts/accept_selfupdate.py           # 安装器 + 自升级本地验收(跨平台,--skip-build 复用 dist/)
 uv run python scripts/accept_selfupdate.py --skip-build --powershell pwsh --expect-ps-major 7   # Windows:再验一遍 PS 7
-uv run python scripts/accept_cli.py                  # CLI 行为验收(源码模式,真实进程、按规范断言)
-uv run python scripts/accept_cli.py --cli dist/orzmc # 同一套断言跑**冻结二进制**(发布前必跑)
-uv run python scripts/accept_cli.py --list-cases     # 看有哪些用例/分组;--only envelope,completion 只跑一组
+uv run python ../scripts/accept/cli.py --cli 'uv run orzmc'  # CLI 行为验收(源码模式,真实进程、按规范断言)
+uv run python ../scripts/accept/cli.py --cli dist/orzmc --frozen  # 同一套断言跑**冻结二进制**(发布前必跑)
+uv run python ../scripts/accept/cli.py --list-cases        # 看有哪些用例/分组;--only envelope,completion 只跑一组
 uv lock                            # 锁定依赖
 ```
 
 ## CLI 层不变式(`orzmc_app/cli`)与自动化验收
 
-**6 条不变式**(每条都有单测或 `scripts/accept_cli.py` 守着,别凭记忆改):
+**6 条不变式**(每条都有单测或父仓库 `scripts/accept/cli.py` 守着,别凭记忆改):
 
 1. **`_begin(command, ctx)` 必须是命令回调的第一条语句**。`_fail` / `_emit` 靠模块级 `_STATE` 决定「输出信封还是人类可读」,晚于任何 `_fail` 就会「`--json` 却打了人类可读错误」(`update --channel bogus` 真踩过:错误进了 stdout、信封不存在)。
 2. **错误写 stderr,结果写 stdout**(规范 §6)。`_fail` 用 `_console_err`;`_reporter(ctx)` 在 `--json` 时把库日志切 stderr —— 所以**别自己 new `RichReporter`**(`uninstall` 曾因此把库日志写进 stdout,破坏「stdout 恰好一个信封」)。`RichReporter` 会给注入的 Console `push_theme`,所以 `Console(stderr=True)` 也能正常渲染 `style="info"`(缺 theme 时第一次日志就 `MissingStyle` → 被兜成 `E_RUNTIME`)。
@@ -168,7 +168,9 @@ uv lock                            # 锁定依赖
 5. **补全收口在 `orzmc completion`**(契约见父仓库 `docs/spec/cli-surface.md` §4.5 / `frontends.md` F6):`add_completion=True` 只为注册 typer 的补全类(click 处理 `_ORZMC_COMPLETE` 的动态补全依赖它),随后 `app._add_completion = False` 摘掉 typer 自带的 `--install-completion`/`--show-completion`(与 `completion` 重复、英文文案、且只能靠 shellingham 探测 shell)。`completion install` 走 `orzmc_app/cli/completions.py`:**从 `$SHELL`/`PSModulePath` 推断(不 import shellingham)、固定落点幂等覆盖、不改执行策略**;rc 只在 shell 不会自动加载落点时补一行(bash `source` / zsh `fpath`,带标记、已存在不重复写;fish 无需 rc)。`powershell`/`pwsh` 按 F6 **只生成脚本、不落盘**,`install` 对它们返回 `E_UNSUPPORTED`(不是「成功但没装」);落盘成功后把路径登记进 `install.conf` 的 `completion_file`,由 `uninstall` 清理。
 6. **PyInstaller 必须显式收集「动态 import」的依赖**(`scripts/build.py` 的 `--collect-submodules shellingham`)。shellingham 用 `importlib.import_module(f".{os.name}")` 导入平台实现,静态分析看不到 → 冻结二进制缺 `shellingham.posix`/`nt` → 任何探测直接 `RuntimeError`(2.11.0 及更早的发布版 `completion install` / `--show-completion` 全崩,而单测全绿)。新增/升级依赖时先问「它有没有动态 import」,再交给 `binary` job 的 `--cli` 验收兜住。
 
-**`scripts/accept_cli.py`(CLI 自动化验收)**:按**规范**而不是按实现对**真实进程**断言,用例分组:
+**CLI 自动化验收(父仓库 `scripts/accept/cli.py`)**:按**规范**而不是按实现对**真实进程**断言,用例分组:
+
+> 脚本住**父仓库** `scripts/accept/cli.py`(M2:判据一份、两套实现共用) —— 本仓库里没有它;CI 先 checkout 父仓库再跑它。
 
 | 组 | 断言 |
 |:--|:--|
@@ -232,7 +234,7 @@ uv lock                            # 锁定依赖
 
 **6 平台矩阵**(多处复用同一组 runner 标签):`ubuntu-latest`、`ubuntu-24.04-arm`、`macos-15-intel`、`macos-15`、`windows-latest`、`windows-11-arm`。注意 **`macos-13` 已废弃**,x86_64 macOS 用 `macos-15-intel`;`macos-latest` 已迁到 macOS 26,arm64 显式钉 `macos-15`。arm64 runner 为 public preview。
 
-- **`ci.yml`(push/PR + `workflow_dispatch`)**:`quality` 单 runner 跑格式/lint/mypy/测试/构建(平台无关);`test` 6 平台全跑 pytest(纯 Python 假件但覆盖 OS 敏感路径,秒级);`binary` 与 `installer` 在 `push` 到分支时跑,或用 `workflow_dispatch -f full=true` 在任意分支按需跑(发版 tag push 与普通 PR 不跑)——`binary` 6 平台 PyInstaller 构建 + **冻结二进制的 CLI 验收**(`scripts/accept_cli.py --cli dist/orzmc`)+ 上传 artifact,`installer` 6 平台安装器 e2e(本地构建 `--file` 接缝 + 隔离环境,装→`version`→`uninstall`→断言二进制与 manifest 已删,见上文「一键安装/卸载」)。声明 `workflow_call` + `skip-test-matrix` input,供 release 复用。
+- **`ci.yml`(push/PR + `workflow_dispatch`)**:`quality` 单 runner 跑格式/lint/mypy/测试/构建(平台无关);`test` 6 平台全跑 pytest(纯 Python 假件但覆盖 OS 敏感路径,秒级);`binary` 与 `installer` 在 `push` 到分支时跑,或用 `workflow_dispatch -f full=true` 在任意分支按需跑(发版 tag push 与普通 PR 不跑)——`binary` 6 平台 PyInstaller 构建 + **冻结二进制的 CLI 验收**(父仓库 `scripts/accept/cli.py --cli dist/orzmc --frozen`)+ 上传 artifact,`installer` 6 平台安装器 e2e(本地构建 `--file` 接缝 + 隔离环境,装→`version`→`uninstall`→断言二进制与 manifest 已删,见上文「一键安装/卸载」)。声明 `workflow_call` + `skip-test-matrix` input,供 release 复用。
 - **`acceptance.yml`(每日 04:23 UTC + workflow_dispatch)**:失败时 `notify` job 自动开/追加 issue(`acceptance-logs-primary-*` / `-backcompat-*` 两套 artifact 名故意分开,同平台同名上传会冲突)。真实验收 harness `scripts/acceptance.py`(跨平台,stdlib + psutil 进程树管理,替代 `pgrep`/`pkill`;`-m orzmc_app.cli` 调 CLI,不嵌套 `uv run`)。
   - **版本策略(以最新版为主基准)**:`primary` job 夜间+手动,6 平台跑最新版 × 全部类型(server vanilla/paper/fabric/forge + client vanilla/fabric/forge);`backcompat` job 仅手动 `suite=full`,x86_64 三平台跑旧版本 vanilla 冒烟(`--backcompat`,默认 `1.20.4`)。`latest` 由 Mojang `version_manifest_v2.json` 的 `latest.release` 解析,不额外拉取其它源。
   - **判定语义**:`PASS`(server 日志 `Done (` / client 退出码 0 引导级);`UP(no Done)`(端口开 90s 无 Done = Mojang MC-263542 世界生成卡死,记警告不判失败);`SKIP`(日志含"不支持 Minecraft"/"未找到 Minecraft",类型暂未适配该版本,如 Forge 滞后);`UP(gap)`(上游无该平台产物:Adoptium 对某 OS/arch/major 的 Temurin 返回 404,或 Mojang 无该 arch 的 lwjgl natives —— 记警告不判失败,上游补齐后自动恢复真实判定);`FAIL`/`TIMEOUT` 判失败。客户端引导级判定依赖 Linux `xvfb-run`,headless 需装 xvfb;`--deep-client` 仅真机手动用(CI 的 macOS/Windows 无 GL 上下文会假阴性)。

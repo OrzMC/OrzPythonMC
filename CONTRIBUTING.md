@@ -17,8 +17,8 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv run --all-packages pytest
-uv run python scripts/accept_cli.py          # CLI 行为验收(真实进程:帮助/信封/退出码/取消/补全/MCP)
-uv run python scripts/accept_cli.py --state-paths ../docs/spec/state-paths.json   # 额外比对补全落点
+uv run python ../scripts/accept/cli.py --cli 'uv run orzmc'          # CLI 行为验收(真实进程:帮助/信封/退出码/取消/补全/MCP)
+uv run python ../scripts/accept/cli.py --cli 'uv run orzmc' --state-paths ../docs/spec/state-paths.json   # 额外比对补全落点
 uv build --all-packages
 ```
 
@@ -33,12 +33,13 @@ uv run python scripts/accept_selfupdate.py --skip-build   # 复用已有二进�
 
 ```bash
 uv run --package orzmc-app python scripts/build.py
-uv run python scripts/accept_cli.py --cli dist/orzmc
-uv run python scripts/accept_cli.py --list-cases              # 看全部用例
-uv run python scripts/accept_cli.py --only completion,frozen   # 只跑相关分组
+uv run python ../scripts/accept/cli.py --cli dist/orzmc --frozen
+uv run python ../scripts/accept/cli.py --list-cases              # 看全部用例
+uv run python ../scripts/accept/cli.py --only completion,frozen  # 只跑相关分组
 ```
 
-`scripts/accept_cli.py` 按 `docs/spec/*.md` 断言(不是按当前实现),所以**规范没改就别改断言**。
+CLI 验收脚本住在**父仓库** `scripts/accept/cli.py`(M2:判据一份、Python 与 Swift 共用,
+本仓库里没有它了),按 `docs/spec/*.md` 断言(不是按当前实现),所以**规范没改就别改断言**。
 
 ## PR 上的 CI 与「合前重验收」
 
