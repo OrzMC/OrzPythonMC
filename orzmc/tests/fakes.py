@@ -13,6 +13,8 @@ from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any, Literal
 
+import requests
+
 from orzmc.infra.http import HttpClient
 from orzmc.infra.log import Reporter
 from orzmc.infra.progress import ProgressSink
@@ -74,10 +76,11 @@ class FakeSink(ProgressSink):
 class FakeResponse:
     """Minimal response object: ``with`` / ``raise_for_status`` / ``iter_content`` / headers."""
 
-    def __init__(self, status: int, body: bytes, headers: dict[str, str]) -> None:
+    def __init__(self, status: int, body: bytes, headers: dict[str, str], url: str = "") -> None:
         self.status_code = status
         self.headers = headers
         self._body = body
+        self._url = url
 
     def __enter__(self) -> FakeResponse:
         return self
@@ -87,7 +90,15 @@ class FakeResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise AssertionError(f"HTTP {self.status_code}")
+            # 用 requests 自己的实现生成异常:文案("404 Client Error: Not Found for url: …")
+            # 与真实网络逐字一致 —— 上层与 `scripts/acceptance.py` 的 GAP_MARKS 都依赖它。
+            response = requests.Response()
+            response.status_code = self.status_code
+            response.reason = {404: "Not Found", 403: "Forbidden", 416: "Requested Range Not Satisfiable"}.get(
+                self.status_code, "Error"
+            )
+            response.url = self._url
+            response.raise_for_status()
 
     def json(self) -> Any:
         return _json.loads(self._body.decode("utf-8"))
@@ -135,6 +146,8 @@ class FakeHttp(HttpClient):
         # 认证(``--auth``) API:URL 子串 → ``(status, JSON payload)``;记录全部请求。
         self.api_responses: dict[str, tuple[int, Any]] = {}
         self.api_requests: list[dict[str, Any]] = []
+        # URL 子串 → 强制 HTTP 错误状态(测「4xx/5xx 不重试且保留原文」这类路径)。
+        self.status_overrides: dict[str, int] = {}
 
     def head_location(self, url: str) -> str | None:
         """Seeded 302 target for the rate-limit-proof fallback resolver."""
@@ -165,6 +178,12 @@ class FakeHttp(HttpClient):
         ``HttpClient.get`` returns a ``requests.Response``.
         """
         self.requests.append(("get", url))
+        forced = _longest_match(url, self.status_overrides)
+        if forced is not None:
+            # 与 ``HttpClient.get`` 一致:4xx/5xx 在 get 内就抛(stream_range 依赖这个契约)。
+            response = FakeResponse(forced, b"", {}, url=url)
+            response.raise_for_status()
+            return response
         data = self._payload(url)
         rng = (headers or {}).get("Range")
         if rng and self.ignore_ranges:

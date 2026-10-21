@@ -141,15 +141,17 @@ def log_contains(path: Path, needles: tuple[str, ...]) -> bool:
 
     orzmc prints through rich's Console, which soft-wraps long lines at its
     fallback width when there's no tty — e.g. the Adoptium 404 URL gets split
-    across lines with blank gaps. Collapse all whitespace runs first so a
-    marker spanning a wrapped line still matches.
+    across lines with blank gaps. The wrap can land **inside** a marker, so
+    strip whitespace from both sides before comparing: keeping a single space
+    (the old behaviour) still missed `…/binary/latest` when the break fell
+    inside it. Markers never depend on whitespace, so this is safe.
     """
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    text = re.sub(r"\s+", " ", text)
-    return any(n in text for n in needles)
+    squeezed = re.sub(r"\s+", "", text)
+    return any(re.sub(r"\s+", "", needle) in squeezed for needle in needles)
 
 
 def log_tail(path: Path, size: int = 4096) -> str:

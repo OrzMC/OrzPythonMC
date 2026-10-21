@@ -14,10 +14,10 @@ from typing import Any, ClassVar, Literal, cast
 
 import pytest
 import requests
-from fakes import FakeHttp, parse_range
+from fakes import FakeHttp, FakeResponse, parse_range
 from requests.adapters import HTTPAdapter
 
-from orzmc.infra.http import HttpClient, parse_content_length
+from orzmc.infra.http import HttpClient, HttpStatusError, parse_content_length
 from orzmc.infra.transfer import _PROBE_SIZE, PARALLEL_MIN_SIZE, download_with_progress
 
 # 略高于分块阈值:够触发分块,又不至于让测试变慢。
@@ -278,6 +278,53 @@ class TestHttpClient:
         assert not (tmp_path / "f.bin.tmp").exists()
 
 
+class _StatusSession:
+    """每个请求都返回同一个 HTTP 错误状态(并记录被请求了几次)。"""
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+        self.calls: list[str] = []
+
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        self.calls.append(url)
+        return FakeResponse(self.status, b"", {}, url=url)
+
+
+class TestHttpStatusIsNotRetried:
+    """4xx/5xx 是确定性失败:不能当「中途断连」重试 4 次。
+
+    回归背景:Adoptium 没有 Java 25 的 windows/aarch64 构建(url 回 404),旧代码把
+    ``raise_for_status()`` 抛的 ``HTTPError`` 也归入"断连重试",最终报
+    "下载中途多次断开,已重试 4 次仍失败" —— 既发了 4 次无谓请求,又把真实原因(404)
+    掩盖掉,导致夜间验收把"上游缺包"误判为 FAIL 而不是 UP(gap)
+    (``scripts/acceptance.py`` 的 GAP_MARKS 就靠 requests 的原始文案)。
+    """
+
+    URL = "https://api.adoptium.net/v3/binary/latest/25/ga/windows/aarch64/jre/hotspot/normal/eclipse"
+
+    def test_404_fails_fast_and_keeps_the_original_message(self, tmp_path) -> None:
+        client = HttpClient()
+        session = _StatusSession(404)
+        client._session = session  # type: ignore[assignment]
+        with pytest.raises(HttpStatusError) as info:
+            client.download(self.URL, str(tmp_path / "f.bin"))
+        assert session.calls == [self.URL]  # 只请求一次:没有重试预算
+        assert info.value.status == 404
+        assert info.value.url == self.URL
+        # 验收 harness 的 GAP_MARKS 片段必须保留在这条消息里
+        assert "404 Client Error: Not Found for url: https://api.adoptium.net/v3/binary/latest" in str(info.value)
+        assert not (tmp_path / "f.bin").exists()
+
+    def test_416_on_an_already_complete_range_successes(self, tmp_path) -> None:
+        """续传的分块已经写全时,服务端会以 416 拒绝越界 Range —— 那是「下完了」。"""
+        part = tmp_path / "p"
+        part.write_bytes(b"x" * 2000)
+        client = HttpClient()
+        client._session = _StatusSession(416)  # type: ignore[assignment]
+        written, _, status = client.stream_range("https://x/f.bin", 1000, 2999, str(part))
+        assert (written, status) == (2000, 416)
+
+
 class TestResumeAfterMidStreamBreak:
     """urllib3 的 Retry 只覆盖建连,不覆盖 body 读取 —— 中途掉线必须自己续传。"""
 
@@ -305,8 +352,10 @@ class TestResumeAfterMidStreamBreak:
     def test_gives_up_after_the_attempt_budget(self, tmp_path) -> None:
         client = HttpClient()
         client._session = _FlakySession(b"x" * 100, always_break=True)  # type: ignore[assignment]
-        with pytest.raises(RuntimeError, match="多次断开"):
+        with pytest.raises(RuntimeError, match="多次断开") as info:
             client.download("https://x/f.bin", str(tmp_path / "f.bin"))
+        # 放弃时要说清楚最后一次究竟怎么了(否则只剩一句看不到原因的文案)
+        assert "IncompleteRead" in str(info.value)
         assert not (tmp_path / "f.bin").exists()
 
     def test_fetch_range_resumes_and_requires_206(self, tmp_path) -> None:

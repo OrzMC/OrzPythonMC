@@ -31,6 +31,27 @@ _CHUNK_SIZE = 1024 * 64
 RESUME_ATTEMPTS = 4
 
 
+class HttpStatusError(RuntimeError):
+    """上游返回 4xx/5xx —— 确定性失败,重试不会变好。
+
+    与「中途断连」必须分开:断连要续传重试,4xx/5xx 重试只是把「上游没有这个文件」
+    拖成 4 次无谓请求、还把真实原因(如 404)掩盖成「下载中途多次断开」。
+    ``status`` / ``url`` 留给上层给出可执行的提示(如 Adoptium 没有该平台的构建)。
+    """
+
+    def __init__(self, message: str, *, status: int, url: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.url = url
+
+
+def _has_everything(have: int, expected: int | None, total: int | None) -> bool:
+    """已落盘字节是否已经取全(续传时服务端会以 416 拒绝越界 ``Range``)。"""
+    if expected is not None:
+        return have >= expected
+    return total is not None and have >= total
+
+
 def parse_content_length(headers: Mapping[str, str]) -> int | None:
     """Content-Length from response headers, or None when absent/not a number."""
     value = headers.get("Content-Length")
@@ -193,6 +214,10 @@ class HttpClient:
         ``Range: bytes=<已落盘>-<end>`` 只补齐剩余部分;若服务器忽略 ``Range`` 回 200,
         则作废已落盘字节整份重来。首块(未落盘)且非强制 Range 时不发 ``Range``,
         以便从 200 的 ``Content-Length`` 得到总大小。
+
+        HTTP 错误状态(4xx/5xx)不是抖动,立刻以 :class:`HttpStatusError` 失败(消息保留
+        原 ``requests`` 文案,便于上层按状态码/地址判断)。唯一的例外是续传时服务端返回
+        ``416`` 且本地已取全 —— 那是「已经下完了」,按成功返回。
         """
         os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
         expected = None if end is None else end - start + 1
@@ -222,10 +247,18 @@ class HttpClient:
                                 if on_chunk:
                                     on_chunk(len(chunk))
                 return have, total, status
+            except requests.HTTPError as exc:
+                # 状态码错误(确定性失败):不重试,保留 requests 的原文
+                # ("404 Client Error: Not Found for url: …"),让上层能按状态码给提示。
+                http_status = exc.response.status_code if exc.response is not None else 0
+                if http_status == 416 and _has_everything(have, expected, total):
+                    return have, total, http_status
+                raise HttpStatusError(str(exc), status=http_status, url=url) from exc
             except requests.RequestException as exc:
+                # 传输层抖动(连接重置 / IncompleteRead):续传重试。
                 last = exc
                 continue
-        raise RuntimeError(f"下载中途多次断开,已重试 {attempts} 次仍失败: {url}") from last
+        raise RuntimeError(f"下载中途多次断开,已重试 {attempts} 次仍失败: {url}(最后一次:{last})") from last
 
     def fetch_range(
         self,
