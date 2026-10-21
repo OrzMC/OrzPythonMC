@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.18.0...v2.18.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **download:** HTTP 4xx/5xx 立即失败并保留原文，不再误报「中途断开」 ([#98](https://github.com/OrzMC/OrzPythonMC/issues/98)) ([c78eff6](https://github.com/OrzMC/OrzPythonMC/commit/c78eff6295912e225b6bb9d579fee1d2586ecbab))
+
 ## [2.18.0](https://github.com/OrzMC/OrzPythonMC/compare/v2.17.2...v2.18.0) (2026-10-20)
 
 
