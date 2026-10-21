@@ -15,12 +15,28 @@ from collections.abc import Callable
 
 from orzmc.domain.paths import PathLayout
 from orzmc.infra.fs import FileStore
-from orzmc.infra.http import HttpClient
+from orzmc.infra.http import HttpClient, HttpStatusError
 from orzmc.infra.log import Reporter
 from orzmc.infra.progress import ProgressSink
 from orzmc.infra.transfer import PARALLEL_PARTS, download_with_progress
 
 ADOPTIUM_BINARY = "https://api.adoptium.net/v3/binary/latest/{major}/ga/{os}/{arch}/{image}/hotspot/normal/eclipse"
+
+
+def _install_failure(exc: HttpStatusError, *, major: int, image: str, os_name: str, arch: str) -> str:
+    """把 Adoptium 的 HTTP 错误转成用户能执行的提示。
+
+    Temurin 并非每个 OS/arch 都有每个 Java 大版本(实测 Java 25 没有 windows/aarch64
+    的 jre 与 jdk,Java 21 有)—— 那是上游缺包,不是网络问题。原文保留在末尾:
+    验收 harness 靠 `404 Client Error: Not Found for url: https://api.adoptium.net/…`
+    把这类平台缺口归为 UP(gap)(见 `scripts/acceptance.py` 的 GAP_MARKS)。
+    """
+    if exc.status == 404:
+        return (
+            f"Temurin 没有 Java {major} 的 {os_name}/{arch} 构建(上游未发布,HTTP 404)。"
+            f" 可自行安装 Java {major} 并加入 PATH,或改用其它平台/架构。原始错误: {exc}"
+        )
+    return f"下载 Java {major} {image.upper()} 失败(HTTP {exc.status}): {exc}"
 
 
 class JavaEnv:
@@ -77,7 +93,10 @@ class JavaEnv:
         ext = ".zip" if os_name == "windows" else ".tar.gz"
         archive = os.path.join(tmp_dir, f"temurin-{major}-{image}-{os_name}-{arch}{ext}")
 
-        download_with_progress(self._http, url, archive, self._sink, desc, parts=self._parts)
+        try:
+            download_with_progress(self._http, url, archive, self._sink, desc, parts=self._parts)
+        except HttpStatusError as exc:
+            raise RuntimeError(_install_failure(exc, major=major, image=image, os_name=os_name, arch=arch)) from exc
 
         dest_dir = self._paths.java_major_dir(major)
         self._fs.ensure_dir(dest_dir)

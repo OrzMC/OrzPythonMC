@@ -94,6 +94,22 @@ class TestJavaEnv:
         env.resolve(8, need_jdk=False)
         assert fs.is_file(paths.java_bin(8))
 
+    def test_missing_platform_build_explains_the_gap(self, tmp_path, reporter, sink, http) -> None:
+        """Adoptium 缺该平台/大版本的构建(404)时,必须说清楚是上游缺包。
+
+        实测:Java 25 没有 windows/aarch64(jre 与 jdk 均 404),Java 21 有。夜间验收
+        靠 ``404 Client Error: Not Found for url: https://api.adoptium.net/v3/binary/latest``
+        把这类平台缺口归为 UP(gap)(``scripts/acceptance.py`` 的 GAP_MARKS)。
+        """
+        http.status_overrides = {"api.adoptium.net": 404}
+        env = JavaEnv(http, FileStore(), reporter, sink, PathLayout(root=str(tmp_path)))
+        with pytest_raises(RuntimeError) as info:
+            env.resolve(25)
+        message = str(info.value)
+        assert "Temurin 没有 Java 25 的" in message
+        assert "HTTP 404" in message
+        assert "404 Client Error: Not Found for url: https://api.adoptium.net/v3/binary/latest" in message
+
     def test_resolve_java_uses_jre_for_every_type(self, tmp_path, reporter, sink, http) -> None:
         # Every supported type runs on a sandboxed JRE — no game type needs a
         # full JDK at run time (fabric/forge install steps use JREs too).
