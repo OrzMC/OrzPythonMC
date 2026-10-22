@@ -229,7 +229,8 @@ uv run python scripts/accept_selfupdate.py --skip-build --powershell pwsh --expe
 
 # CLI 行为验收(真实进程:帮助/信封/退出码/取消语义/补全/MCP;按规范断言)
 # 脚本在父仓库 `scripts/accept/cli.py`(一份判据,Python 与 Swift 共用)
-uv run python ../scripts/accept/cli.py --cli 'uv run orzmc'
+bin="$(uv run --all-packages python -c 'import shutil; print(shutil.which("orzmc"))')"
+uv run python ../scripts/accept/cli.py --cli "$bin"
 uv run python ../scripts/accept/cli.py --cli dist/orzmc --frozen   # 同一套断言跑冻结二进制(发布前必跑)
 
 # 真实下载 Minecraft / Java 并启动
