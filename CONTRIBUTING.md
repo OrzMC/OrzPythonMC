@@ -17,8 +17,9 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv run --all-packages pytest
-uv run python ../scripts/accept/cli.py --cli 'uv run orzmc'          # CLI 行为验收(真实进程:帮助/信封/退出码/取消/补全/MCP)
-uv run python ../scripts/accept/cli.py --cli 'uv run orzmc' --state-paths ../docs/spec/state-paths.json   # 额外比对补全落点
+bin="$(uv run --all-packages python -c 'import shutil; print(shutil.which("orzmc"))')"
+uv run python ../scripts/accept/cli.py --cli "$bin"   # CLI 行为验收(真实进程:帮助/信封/退出码/取消/补全/MCP)
+uv run python ../scripts/accept/cli.py --cli "$bin" --state-paths ../docs/spec/state-paths.json   # 额外比对补全落点
 uv build --all-packages
 ```
 

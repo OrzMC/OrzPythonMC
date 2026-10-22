@@ -151,7 +151,8 @@ uv publish                         # 发布到 PyPI
 uv run --package orzmc-app python scripts/build.py   # PyInstaller 单文件二进制 → dist/
 uv run python scripts/accept_selfupdate.py           # 安装器 + 自升级本地验收(跨平台,--skip-build 复用 dist/)
 uv run python scripts/accept_selfupdate.py --skip-build --powershell pwsh --expect-ps-major 7   # Windows:再验一遍 PS 7
-uv run python ../scripts/accept/cli.py --cli 'uv run orzmc'  # CLI 行为验收(源码模式,真实进程、按规范断言)
+bin="$(uv run --all-packages python -c 'import shutil; print(shutil.which("orzmc"))')"
+uv run python ../scripts/accept/cli.py --cli "$bin"   # CLI 行为验收(源码模式,真实进程、按规范断言)
 uv run python ../scripts/accept/cli.py --cli dist/orzmc --frozen  # 同一套断言跑**冻结二进制**(发布前必跑)
 uv run python ../scripts/accept/cli.py --list-cases        # 看有哪些用例/分组;--only envelope,completion 只跑一组
 uv lock                            # 锁定依赖
