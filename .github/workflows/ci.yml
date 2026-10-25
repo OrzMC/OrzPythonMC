@@ -89,9 +89,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Checkout parent (spec + ledger)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: OrzMC/OrzMC
           path: parent
@@ -99,7 +99,7 @@ jobs:
             docs/spec
             scripts/verify
             scripts/accept
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - name: Verify ledger against capabilities
         run: |
           set -euo pipefail
