@@ -165,6 +165,51 @@ def test_ensure_refreshes_stale_session(tmp_path) -> None:
     assert token_calls and token_calls[0]["data"]["grant_type"] == "refresh_token"
 
 
+def test_transient_refresh_failure_preserves_session(tmp_path) -> None:
+    http = _device_flow_http()
+    http.api_responses["oauth2/v2.0/token"] = (503, {"error": "temporarily_unavailable"})
+    store = AuthStore(str(tmp_path))
+    store.save(_session(expires_at=900.0), "cid")
+    auth = Authenticator(http, store, "cid", clock=_Clock())
+    with pytest.raises(AuthError):
+        auth.ensure()
+    saved = store.load()
+    assert saved is not None
+    assert saved.msa.refresh_token == "REFRESH"
+    assert len(http.api_requests) == 1
+
+
+def test_invalid_grant_clears_session_and_starts_login(tmp_path) -> None:
+    http = _device_flow_http()
+    http.api_responses["oauth2/v2.0/token"] = (400, {"error": "invalid_grant"})
+    http.api_responses["/devicecode"] = (503, {"error": "temporarily_unavailable"})
+    store = AuthStore(str(tmp_path))
+    store.save(_session(expires_at=900.0), "cid")
+    auth = Authenticator(http, store, "cid", clock=_Clock())
+    with pytest.raises(AuthError):
+        auth.ensure()
+    assert store.load() is None
+    assert len(http.api_requests) == 2
+
+
+def test_rotated_refresh_token_survives_downstream_failure(tmp_path) -> None:
+    http = _device_flow_http()
+    http.api_responses["oauth2/v2.0/token"] = (
+        200,
+        {"access_token": "NEW_MSA", "refresh_token": "NEW_REFRESH", "expires_in": 3600},
+    )
+    http.api_responses["user.auth.xboxlive.com"] = (503, {"error": "temporarily_unavailable"})
+    store = AuthStore(str(tmp_path))
+    store.save(_session(expires_at=900.0), "cid")
+    auth = Authenticator(http, store, "cid", clock=_Clock())
+    with pytest.raises(AuthError):
+        auth.ensure()
+    saved = store.load()
+    assert saved is not None
+    assert saved.msa.refresh_token == "NEW_REFRESH"
+    assert saved.expires_at == 900.0
+
+
 def test_xsts_rejection_maps_to_e_auth_xbox(tmp_path) -> None:
     http = _device_flow_http()
     http.api_responses["xsts.auth.xboxlive.com"] = (401, {"XErr": 2148916233, "Message": "无 Xbox 账号"})
