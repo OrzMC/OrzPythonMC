@@ -68,8 +68,10 @@ class Authenticator:
                     return replace(current, source="cache")
                 target = current if current is not None else session
                 try:
-                    return self.refresh(target.msa)
-                except AuthError:
+                    return self._refresh(target.msa, previous=target)
+                except AuthError as exc:
+                    if exc.code != "E_AUTH_EXPIRED":
+                        raise
                     # refresh token 被拒(如用户改密/撤销授权)→ 清掉重登,不吞错。
                     self._store.clear()
         return self.login()
@@ -87,11 +89,21 @@ class Authenticator:
 
     def refresh(self, msa: MsaTokens) -> AuthSession:
         """用 MSA ``refresh_token`` 换新 MSA 令牌,再重走 Xbox 链路。"""
+        return self._refresh(msa)
+
+    def _refresh(self, msa: MsaTokens, *, previous: AuthSession | None = None) -> AuthSession:
         status, data = self._send(auth_map.token_refresh_request(self._client_id, msa.refresh_token))
         if status != 200:
+            if status == 400 and data.get("error") == "invalid_grant":
+                raise AuthError("E_AUTH_EXPIRED", _error_text(data))
             action = auth_map.classify_token_error(data.get("error"))
-            raise AuthError(action.code or "E_AUTH_EXPIRED", _error_text(data))
-        return self._complete(auth_map.token_result(data, self._clock()), source="refresh")
+            code = "E_AUTH" if action.code == "E_AUTH_EXPIRED" else action.code or "E_AUTH"
+            raise AuthError(code, _error_text(data))
+        tokens = auth_map.token_result(data, self._clock())
+        if previous is not None:
+            # 令牌可能已经轮换,下游 Xbox / Minecraft 暂时失败时也要保留新令牌。
+            self._store.save(replace(previous, msa=tokens), self._client_id)
+        return self._complete(tokens, source="refresh")
 
     # ── 内部 ────────────────────────────────────────────────────────────────
     def _poll(self, device: DeviceCode) -> MsaTokens:

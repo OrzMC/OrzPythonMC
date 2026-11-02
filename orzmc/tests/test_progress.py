@@ -10,9 +10,16 @@ import io
 import time as _time
 from types import SimpleNamespace
 
+import pytest
 from rich.console import Console
 
 from orzmc.infra.progress import NullProgress, ProgressSink, RichProgress, _count_column, _percentage_column
+
+
+@pytest.fixture(autouse=True)
+def _terminal_supports_live_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
+    # force_terminal alone does not override Rich's TERM=dumb detection.
+    monkeypatch.setenv("TERM", "xterm-256color")
 
 
 def _sink() -> tuple[RichProgress, io.StringIO]:
