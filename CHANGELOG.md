@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.2](https://github.com/OrzMC/OrzPythonMC/compare/v2.18.1...v2.18.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **auth:** 保留可恢复的登录会话 ([#109](https://github.com/OrzMC/OrzPythonMC/issues/109)) ([fa1659e](https://github.com/OrzMC/OrzPythonMC/commit/fa1659eb90eb36e7f7a6daec0a9ae2d7409d7846))
+
 ## [2.18.1](https://github.com/OrzMC/OrzPythonMC/compare/v2.18.0...v2.18.1) (2026-10-21)
 
 
